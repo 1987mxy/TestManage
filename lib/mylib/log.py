@@ -2,7 +2,7 @@
 
 import logging
 from sys import stdout
-from os import path,mkdir
+from os import path,mkdir,popen
 from win32gui import GetWindowDC
 from win32ui import CreateDCFromHandle, CreateBitmap
 from win32api import EnumDisplayMonitors
@@ -15,7 +15,14 @@ LOG = None
 class mylog(object):
     def __init__(self, logger):
         self.logger = logger
-        mylib.settings.Status = CONF.getStatus()
+        if path.exists('config.ini'):
+            mylib.settings.Status = CONF.getStatus()
+    
+    def formatHex(self, string):
+        hexlist = []
+        for s in string:
+            hexlist.append('%02x '%ord(s))
+        return ''.join(hexlist)
     
     def critical(self, string, argument = None):   #high
         if  mylib.settings.Status == 'release':
@@ -25,7 +32,7 @@ class mylog(object):
                 self.logger.critical(string)
         elif  mylib.settings.Status == 'debug':
             if argument:
-                self.logger.critical('%s%s'%(string, argument.__repr__()))
+                self.logger.critical('%s%s'%(string, self.formatHex(argument)))
             else:
                 self.logger.critical(string)
     
@@ -37,7 +44,7 @@ class mylog(object):
                 self.logger.error(string)
         elif mylib.settings.Status == 'debug':
             if argument:
-                self.logger.error('%s%s'%(string, argument.__repr__()))
+                self.logger.error('%s%s'%(string, self.formatHex(argument)))
             else:
                 self.logger.error(string)
 
@@ -49,7 +56,7 @@ class mylog(object):
                 self.logger.warning(string)
         elif mylib.settings.Status == 'debug':
             if argument:
-                self.logger.warning('%s%s'%(string, argument.__repr__()))
+                self.logger.warning('%s%s'%(string, self.formatHex(argument)))
             else:
                 self.logger.warning(string)
 
@@ -61,7 +68,7 @@ class mylog(object):
                 self.logger.info(string)
         elif mylib.settings.Status == 'debug':
             if argument:
-                self.logger.info('%s%s'%(string, argument.__repr__()))
+                self.logger.info('%s%s'%(string, self.formatHex(argument)))
             else:
                 self.logger.info(string)
     
@@ -73,7 +80,7 @@ class mylog(object):
                 self.logger.debug(string)
         elif mylib.settings.Status == 'debug':
             if argument:
-                self.logger.debug('%s%s'%(string, argument.__repr__()))
+                self.logger.debug('%s%s'%(string, self.formatHex(argument)))
             else:
                 self.logger.debug(string)
                 

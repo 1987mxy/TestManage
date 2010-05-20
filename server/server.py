@@ -7,6 +7,7 @@ import stackless
 from urllib import urlopen
 from traceback import format_exc
 from struct import unpack, pack
+import time
 
 
 from mylib.log import LOG
@@ -47,7 +48,7 @@ class MyStacklessChannel(stackless.channel):
         return ''
 
 class net(object):
-    def __init__(self, sock, addr, magicCode, heartCode):
+    def __init__(self, sock, addr, options):
         if self.__class__ is net:
             LOG.error('net class dose not instantiation')
             raise 'net class dose not instantiation'
@@ -55,8 +56,10 @@ class net(object):
         self.sock = sock
         self.switch = True
         self.death = False
-        self.magicCode = magicCode
-        self.heartCode = heartCode
+        self.magicCode = options.magicCode
+        self.heartCode = options.heartCode
+        self.responseCode = options.responseCode
+        self.packageID = 0
         self.headformat = '<HLHHL'
         self.broadcast = MyStacklessChannel()
         self.net_to_parse = MyStacklessChannel()
@@ -105,6 +108,8 @@ class net(object):
                     self.exit()
                 elif self.switch:
                     if rdata.__class__ is list:
+                        if self.responseCode:
+                            self.packageID += 1
                         self.sock.sendall(rdata[0])
                         LOG.debug('uuid package %s send to %s : '%(rdata[1], self.address), rdata[0])
                     else:
@@ -136,8 +141,8 @@ class testManage(net):
     def __init__(self, sock, addr):
         super(testManage, self).__init__(sock, 
                                          addr, 
-                                         settings.TestManage.magicCode, 
-                                         settings.TestManage.heartCode)
+                                         settings.TestManage)
+        self.heartID = 0
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
         
         self.task_reHeart = stackless.tasklet(self.reHeart)(10)
@@ -162,26 +167,28 @@ class testManage(net):
             self.exit()
         
     def reHeart(self, time):
-        h_pack = mylib.package.pack6()
         while self.switch:
-            LOG.debug('send heart to TestManage %s !'%self.address)
-            SLEEP.delay_caller(time)
             try:
+                h_pack = mylib.package.pack6(self.heartID)
                 self.sock.sendall(h_pack)
-            except:
-                pass
+                LOG.info('send heart %s to TestManage %s !'%(self.heartID, self.address))
+                if self.heartID >= 0xffffffff:
+                    self.heartID = 0
+                else:
+                    self.heartID += 1
+            except Exception, e:
+                print e
+            SLEEP.delay_caller(time)
         
     def exit(self):
         global CONTROL, CHList
         self.broadcast.close()
-        self.heart.close()
         self.net_to_parse.close()
         self.switch = False
-        self.sock.shutdown(socket.SHUT_RDWR)
         self.sock.close()
         if self.address in CHList.keys():    #不是CONTROL
             del(CHList[self.address])
-            if CONTROL:
+            if CONTROL and self.broadcast in CLTLIST:
                 info = '%s heart time out or disconnect ...'%self.address
                 CONTROL.send(mylib.package.pack2(info))
             self.chkEnd(self.address)
@@ -200,7 +207,7 @@ class testManage(net):
         pbr = Response()
         while self.switch:
             r_pack = self.net_to_parse.receive()
-            if r_pack[1] in [0x9001,0x9003,0x9004]:   #是用SID不停登陆的,所以需要不显示LOG
+            if r_pack[1] in [0x9001,0x0003,0x0004]:   #是用SID不停登陆的,所以需要不显示LOG
                 LOG.debug('received head from TestManage %s : [%d, %2x]'%(self.address, 
                                                                           r_pack[0], 
                                                                           r_pack[1]))
@@ -259,7 +266,7 @@ class testManage(net):
                                                                         self.address, 
                                                                         url))
                     pbr.ParseFromString(r_pack[2])
-                    LOG.info('%s_%s TestManage receive http response : %s'%(user, 
+                    LOG.debug('%s_%s TestManage receive http response : %s'%(user, 
                                                                             self.address, 
                                                                             pbr))
                     if pbr.code == 200000:
@@ -276,31 +283,33 @@ class testManage(net):
                         LOG.error('%s_%s TestManage double logined failed !'%(user, 
                                                                               self.address))
 #===============================================================================
-# 姚常鋆 C++ Client LOG收集逻辑
+# #===============================================================================
+# # 姚常鋆 C++ Client LOG收集逻辑
+# #===============================================================================
+#            elif r_pack[1] == 0x1001:
+#                filename_len = unpack('<H',r_pack[2][14 : 16])[0]   #log文件名长度
+#                filename = r_pack[2][16 : filename_len + 16]
+#                if filename in self.file.keys():
+#                    self.file[filename].write(r_pack[2][filename_len + 16 : ])   #补充文件
+#                else:
+#                    chkPath(r'.\gmlog')
+#                    self.file[filename] = open(r'.\gmlog\%s'%filename,'wb')
+#                    self.file[filename].write(r_pack[2][filename_len + 16 : ])
+#            elif r_pack[1] == 0x10ff:
+#                filename_len = unpack('<H',r_pack[2][14 : 16])[0]
+#                filename = r_pack[2][16 : filename_len + 16]
+#                if filename in self.file.keys():
+#                    self.file[filename].close()
+#                    del(self.file[filename])
+#                    self.broadcast.send(mylib.package.packCltEnd())
 #===============================================================================
-            elif r_pack[1] == 0x1001:
-                filename_len = unpack('<H',r_pack[2][14 : 16])[0]   #log文件名长度
-                filename = r_pack[2][16 : filename_len + 16]
-                if filename in self.file.keys():
-                    self.file[filename].write(r_pack[2][filename_len + 16 : ])   #补充文件
-                else:
-                    chkPath(r'.\gmlog')
-                    self.file[filename] = open(r'.\gmlog\%s'%filename,'wb')
-                    self.file[filename].write(r_pack[2][filename_len + 16 : ])
-            elif r_pack[1] == 0x10ff:
-                filename_len = unpack('<H',r_pack[2][14 : 16])[0]
-                filename = r_pack[2][16 : filename_len + 16]
-                if filename in self.file.keys():
-                    self.file[filename].close()
-                    del(self.file[filename])
-                    self.broadcast.send(mylib.package.packCltEnd())
                 
     def dispense(self, package):
         global CLTLIST
         for ip in CLTLIST:     #调出0x0001包中所存在的目的地址
             if ip in CHList.keys():     #与正连接的客户端列表进行比较
                 CHList[ip].send(package)
-                LOG.info('send to TestManage %s'%ip)
+                LOG.debug('send to TestManage %s'%ip)
             else:
                 info = '%s connecting failed ...'%ip
                 LOG.info(info)
@@ -388,8 +397,7 @@ class VirtualMessage_to_Client(net):
     def __init__(self, sock, addr):
         super(VirtualMessage_to_Client, self).__init__(sock, 
                                                        addr, 
-                                                       settings.VirtualMessagetoClient.magicCode, 
-                                                       settings.VirtualMessagetoClient.heartCode)
+                                                       settings.VirtualMessagetoClient)
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
         
         self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
@@ -409,10 +417,9 @@ class VirtualMessage_to_Client(net):
 
     def exit(self):
         self.broadcast.close()
-        self.heart.close()
+        
         self.net_to_parse.close()
         self.switch = False
-        self.sock.shutdown(socket.SHUT_RDWR)
         self.sock.close()
         if self.uid in CHList.keys():
             if self.broadcast in CHList[self.uid]:
@@ -458,7 +465,7 @@ class VirtualMessage_to_Client(net):
                                                                               self.address, 
                                                                               url))
                             pbr.ParseFromString(r_pack[2])
-                            LOG.info('%s_%s GMClient receive http response : %s'%(user, 
+                            LOG.debug('%s_%s GMClient receive http response : %s'%(user, 
                                                                                   self.address, 
                                                                                   pbr))
                             if pbr.code == 200000:
@@ -482,7 +489,7 @@ class VirtualMessage_to_Client(net):
                                                                              self.address, 
                                                                              url))
                             pbr.ParseFromString(r_pack[2])
-                            LOG.info('%s_%s GMClient receive http response: %s'%(user, 
+                            LOG.debug('%s_%s GMClient receive http response: %s'%(user, 
                                                                                  self.address, 
                                                                                  pbr))
                             if pbr.code == 200000:
@@ -522,7 +529,7 @@ class VirtualMessage_to_Client(net):
                 url = '%s/user.tcplogout/?alt=pbbin&sid=%s&service=msg'%(settings.APPSERVER,
                                                                          self.sid)
                 mdata = urlopen(url).read()
-                LOG.info('%s_%s_%s GMClient send http request: %s'%(self.user, 
+                LOG.debug('%s_%s_%s GMClient send http request: %s'%(self.user, 
                                                                     self.uid, 
                                                                     self.address, 
                                                                     url))
@@ -557,16 +564,15 @@ class VirtualMessage_to_Service(net):
     def __init__(self, sock, addr):
         super(VirtualMessage_to_Service, self).__init__(sock, 
                                                         addr, 
-                                                        settings.VirtualMessagetoService.magicCode, 
-                                                        settings.VirtualMessagetoService.heartCode)
+                                                        settings.VirtualMessagetoService)
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
         self.task_receive = stackless.tasklet(self.receive)()
         self.package = None
         
     def exit(self):
         self.broadcast.close()
-        self.heart.close()
         self.net_to_parse.close()
+        self.sock.close()
         self.switch = False
         LOG.info('%s APP Service exit...'%self.address)
 
@@ -583,10 +589,11 @@ class VirtualMessage_to_Service(net):
                     receivers_list = self.getReceivers(r_pack[2])
                     self.broadcast.send(mylib.package.make_response_app(0))
                     msg.ParseFromString(self.package)
+                    LOG.debug('APP Service transmit package : %s'%msg)
                     for receiver in receivers_list:
                         if str(receiver) in CHList.keys():
-                            LOG.info('APP Service %s transmit to receiver %s : '%(self.address,
-                                                                                  receiver), 
+                            LOG.debug('APP Service %s transmit to receiver %s : '%(self.address,
+                                                                                   receiver), 
                                      self.package)
                             s_string = mylib.package.make_transmit(self.package)
                             for ch in CHList[str(receiver)]:
@@ -619,7 +626,6 @@ def TestThread():
         LOG.info('%s:%s TestManage connected...'%addr)
         test = testManage(sockclient, addr)
         TASK_TEST.append(stackless.tasklet(test.listen_message)())
-    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
 
 def CltThread():
@@ -632,7 +638,6 @@ def CltThread():
         LOG.info('%s:%s Clt connected...'%addr)
         clt = VirtualMessage_to_Client(sockclient, addr)
         TASK_CLT.append(stackless.tasklet(clt.listen_message)())
-    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
         
 def APPThread():
@@ -645,7 +650,6 @@ def APPThread():
         LOG.info('%s:%s APP service connected...'%addr)
         srv = VirtualMessage_to_Service(sockclient, addr)
         TASK_APP.append(stackless.tasklet(srv.listen_message)())
-    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
 
 if __name__ == '__main__':
@@ -660,3 +664,5 @@ if __name__ == '__main__':
     TASK_TEST.append(stackless.tasklet(TestThread)())
     while RUN:
         stackless.run()
+        time.sleep(0.05)
+        

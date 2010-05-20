@@ -4,7 +4,7 @@ import sys
 sys.path.append('..\\lib')
 
 import socket
-from os import system,path
+from os import system
 from traceback import format_exc
 from struct import unpack
 from re import sub, split
@@ -30,7 +30,6 @@ def _getFTime():
 class MainOperation(object):
     def __init__(self):
         global SERVER, PATH, PORT
-        self.compress = False
         self.s_pack = []
         self.e_pack = mylib.package.packCltEnd()
         self.w_pack = mylib.package.pack5()
@@ -50,7 +49,6 @@ class MainOperation(object):
         
     def close(self):
         self.switch = False
-        self.socket.shutdown(socket.SHUT_RDWR)
         self.socket.close()
         
     def send(self):
@@ -83,8 +81,6 @@ class MainOperation(object):
                         LOG.info('%s receive data done!\n'%SERVER)
                     elif head[3] == 0x0006:
                         self.socket.sendall(mdata)
-                        if self.compress:
-                            self.chkCompress()
                         LOG.debug('received heart!')
                     else:
                         self.r_pack.append([head[0], head[3], mdata])
@@ -149,18 +145,15 @@ class MainOperation(object):
             dtldata['logpath'] = ''.join([dtldata['logpath'], TIME, '_', cmds[1], '\\'])
             OTHER = 'up'
         if 'down' in step:   #step中没有down就不会产生文件包
-            self.compress = True
-            files = dtldata['down'].split('|')
-            mylib.package.pack3_compression(PATH['filepath'], files)
+            downFileName = dtldata['down'].split('|')
+            self.s_pack.append(mylib.package.pack3(PATH['filepath'], downFileName))
         elif 'update' in step:
-            self.compress = True
-            self.s_pack, mylib.package.pack3_compression('%supdate\\'%PATH['filepath'], ['*.*'])
+            self.s_pack.append(mylib.package.pack3('%supdate\\'%PATH['filepath'], ['*.*']))
             OTHER = 'update'
         try:
             self.connect()
             self.socket.settimeout(HEARTTIMEOUT)
-            if not self.compress:
-                self.send()
+            self.send()
             self.receive()
             self.listen_message()
         except Exception, e:
@@ -175,11 +168,11 @@ class MainOperation(object):
     def makeCMDString(self, dtldata):
         string = []
         for key in dtldata.keys():
-            string += [key, dtldata[key]]
+            string += [key, ':', dtldata[key], '<']
         return ''.join(string)
         
     def makeCLTString(self):
-        cltlist_string = ''
+        cltlist_string = []
         if PATH['list'] == 'all':
             cltlist_string = '\xff\xff'
         else:
@@ -204,13 +197,6 @@ class MainOperation(object):
             
             cltlist_string = ''.join([chr(cltlist_string_len % 256), chr(cltlist_string_len / 256)] + cltlist_string)
         return cltlist_string
-    
-    def chkCompress(self):
-        if path.exists(r'.\temp\down.rar'):
-            package = mylib.package.pack3_upload()
-            self.s_pack.append(package)
-            self.send()
-            self.compress=False
 
 if __name__ == '__main__':
     TIME = _getFTime()
