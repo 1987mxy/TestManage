@@ -45,7 +45,6 @@ class MainOperation(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((SERVER, PORT))
         self.socket.settimeout(HEARTTIMEOUT)
-        self.socket.sendall(mylib.package.pack6())   #第一个心跳包
         
     def close(self):
         self.switch = False
