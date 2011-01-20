@@ -26,7 +26,7 @@ def getIP():
     inf = os.popen('ipconfig')
     ipcfg = inf.readlines()
     for i in xrange(len(ipcfg)):
-        lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])   
+        lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])
         if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i+2]):
             return lineinf[0]
 
@@ -58,10 +58,15 @@ def runcmd(command):
 
 def manageChar(path, char):   #根据通配符得到相应文件列表,uplog时+ip用
     filename = []
+    print char.__repr__()
+    if '\\' in char:
+        spath = re.split(r'\\', char)[0]
+    else:
+        spath = ''
     result = os.popen(r'dir "%s%s"'%(path, char)).read()
     result = re.split(r'\n', result)
     for line in result[5:len(result)-3]:
-        filename.append(re.split(' +', line, 3)[3])
+        filename.append('%s\\%s'%(spath,re.split(' +', line, 3)[3]))
     return filename
 
 class myConfig(object):
@@ -72,7 +77,6 @@ class myConfig(object):
     
     def getPort(self):
         return int(self.conf.get('server', 'port'))    
-    
     
     def getPath(self):
         path = {}
@@ -246,11 +250,13 @@ class workserver(SocketServer.BaseRequestHandler):
     def packFile(self, spath, names):  #up操作包
         ns = []
         for n in names:
+            if not n:
+                continue
             if '\\' in n:
                 realn = n.split('\\')[1]
             else:
                 realn = n
-            ns.append('%s_%s'%(self.fip, n))
+            ns.append('%s_%s'%(self.fip, realn))
             r = runcmd(r'copy /y "%s" ".\temp\%s_%s"'%(spath + n, self.fip, realn))
             r = r[:r.__len__()-1]
             self.result += '%s%s_%s\n'%(r, self.fip, realn)
@@ -275,7 +281,7 @@ if __name__ == '__main__':
     PATH = myConfig().getPath()
     IP = getIP()
     try:
-        server = SocketServer.TCPServer((IP,PORT),workserver)
+        server = SocketServer.TCPServer(('',PORT),workserver)
         server.serve_forever()
     except Exception, e:
         LOGGER.error(str(e))
