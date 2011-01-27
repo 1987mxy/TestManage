@@ -1,2 +1,5 @@
 *.pyc
 *.rar
+.pydevproject
+.project
+.settings

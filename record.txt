@@ -1,0 +1,9 @@
+modify folder name 'srv' to 'client'
+modify folder name 'clt' to 'control'
+create folder 'server' make to transfer service(Virtual MessageServer)
+create folder 'lib' make to public call library for three module
+user new port is 8782
+import stackless and stacklesssocket
+independence rar.py,config.py,compress.py(don't done)
+create settings file is 'settings.py'
+Virtual MessageServer 

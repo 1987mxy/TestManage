@@ -1,9 +1,14 @@
 #coding=gbk
+import sys
+sys.path.append('..\\lib')
+
 import os
-from ConfigParser import ConfigParser
+import config
 from datetime import datetime
 import socket
 import struct
+
+from settings import *
 
 PATH = {}
 SRVS = {}
@@ -17,55 +22,22 @@ def setTime():
     TIME = str(datetime.now())
     TIME = sub(':', '_', TIME)
 
-def myIP(ip):
-    ips = ip.split('.')
-    tempip = ''
-    for i in ips:
-        i = '*'*(3-i.__len__()) + i
-        tempip += i + '.'
-    return tempip[:tempip.__len__()-1]
 
-class Config(object):
-    def __init__(self):
-        self.cfg = ConfigParser()
-        self.switch = True
-        self.cfg.read('config.ini')
-
-    def command(self):
-        cmds = self.cfg.get('run','command')
-        cmds = cmds.split('|')
-        return cmds
-        
-    def server(self):
-        global SRVS
-        SRVS=dict(self.cfg.items('service'))
-        
-    def path(self):
-        global PATH
-        PATH = dict(self.cfg.items('path'))
-
-    def detail(self, cmd):
-        global PATH
-        data = PATH
-        data.update(dict(self.cfg.items(cmd)))
-        return data
         
 class NetOperation(object):
-    def __init__(self, ip, port, packages):
-        self.ip = ip
-        self.timeout = 0
-        self.port = port
+    def __init__(self, packages):
+        global SERVER
+        self.outtime = 0
         self.pdata = ''
         self.rpack = []
-        self.spack = list(packages)
-        self.spack[self.spack.__len__()-1] += myIP(ip)
+        self.spack = packages
         self.other = None
         self.switch = True
         self.socket = None
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((self.ip, self.port))
+        self.socket.connect((SERVER, PORT))
         self.socket.settimeout(120)
         
     def close(self):
@@ -74,15 +46,14 @@ class NetOperation(object):
     def send(self):
         for pack in self.spack:
             self.socket.sendall(pack)
-        self.socket.sendall(struct.pack('<IH',6,0xffff))
-        print self.ip + ':send\n'
         
     def receive(self):
         if self.switch:
             rdata = self.socket.recv(4096)
-            self.timeout = 0
+            print rdata.__repr__()
+            self.outtime = 0
             if rdata == '':
-                print '%s_%s socket is closed!\n'%(self.ip, self.port)
+                print '%s_%s socket is closed!\n'%(SERVER, self.port)
                 self.socket.close()
                 self.switch = False
             else:
@@ -90,11 +61,11 @@ class NetOperation(object):
                 
     def parseHead(self, data):
         if len(data) >= 6:
-            head = struct.unpack('<IH', data[:6])
+            head = struct.unpack('<LH', data[:6])
             if head[1] == 0xffff:
                 self.socket.close()
                 self.switch = False
-                print '%s receive data done!\n'%self.ip
+                print '%s receive data done!\n'%SERVER
             elif head[0] <= len(data):
                 mdata = data[6:head[0]]
                 data = data[head[0]:]
@@ -121,17 +92,19 @@ class NetOperation(object):
                 file.write(mdata[1])
                 file.close()
                 import rar
-                rar.decompression(mdata[0], PATH['logpath']) #解压log
+                rar.decompression('up',mdata[0], PATH['logpath']) #解压log
                 print '解压%s到%s\n'%(mdata[0], PATH['logpath'])
             
 class MainOperation(object):
     def __init__(self):
+        global SERVER
         self.packages = []
+        self.cltlist_string = ''
         
     def operation(self, cmdline):
-        global SRVS, OTHER
+        global OTHER
         cmds = cmdline.split(' ')
-        dtldata = CONF.detail(cmds[0])
+        dtldata = CONF.getList(cmds[0])
         step = dtldata['step'].split('|')
         if 'up' in step:
             dtldata['logpath'] += TIME + '_' + cmds[1] + '\\'
@@ -142,24 +115,21 @@ class MainOperation(object):
         if 'update' in step:
             self.packFile(PATH['filepath'] + 'update\\', ['*.*'])
             OTHER = 'update'
+        if 'who' in step:
+            self.packWho()
         cmdpack = self.makePocket(dtldata)
         self.packCmd(cmdpack)
+        self.packEnd()
         terms = []
-        for ip in SRVS['list'].split('|'):
-            if ':' in ip:
-                ip, port = ip.split(':')
-                port = int(port)
-            else:
-                port = int(SRVS['port'])
-            try:
-                t = NetOperation(ip, port, self.packages)
-                terms.append(t)
-                t.connect()
-                t.send()
-                t.socket.settimeout(1)
-            except Exception, e:
-                t.switch = False
-                print '%s:%s\n'%(ip, str(e))
+        try:
+            t = NetOperation(self.packages)
+            terms.append(t)
+            t.connect()
+            t.send()
+            t.socket.settimeout(1)
+        except Exception, e:
+            t.switch = False
+            print 'Service:%s\n'%str(e)
         cont = True;
         while cont:
             cont = False
@@ -173,19 +143,19 @@ class MainOperation(object):
                 except Exception, e:
                     if not e.message == 'timed out':
                         t.switch = False
-                        print '%s:%s\n'%(t.ip, str(e))
+                        print '%s:%s\n'%(SERVER, str(e))
                     else:
-                        t.timeout += 1
-                        if t.timeout > 30:
+                        t.outtime += 1
+                        if t.outtime > 30:
                             t.switch = False
-                            print '%s: time out!'%t.ip
+                            print '%s: time out!'%SERVER
                 if t.switch:
                     cont = t.switch
         for t in terms:
             try:
                 t.runCommand()
             except Exception, e:
-                print '%s:%s\n'%(t.ip, str(e))
+                print '%s:%s\n'%(SERVER, str(e))
         if OTHER == 'up':
             os.system('explorer "' + PATH['logpath'] + '"')
 
@@ -194,39 +164,62 @@ class MainOperation(object):
         pocket = ''
         for key in dtldata.keys():
             pocket += key + ':' + dtldata[key] + '<'
-        pocket += 'ip:'
+#        pocket += 'ip:' + SRVS['list']
         return pocket
 
     def packCmd(self, pocket):  #发送指令包
-        package = struct.pack('<IH',
-                              pocket.__len__() + 21,
-                              0x0001)
-        package += pocket
+        self.getCltString()
+        package = struct.pack('<LHH', 
+                              8 + self.cltlist_string.__len__() + pocket.__len__(), 
+                              0x0001, 
+                              self.cltlist_string.__len__())
+        package += (self.cltlist_string + pocket)
+        self.packages.append(package)
+        
+    def getCltString(self):
+        global CTRLS
+        cltlist = re.split('[|:.]', CTRLS['list'])
+        self.cltlist_string = ''
+        for i in range(cltlist):
+            if (i+1)%5 == 0:
+                if cltlist[i]:
+                    self.cltlist_string += chr(int(cltlist[i])/256) + chr(int(cltlist[i])%256)
+                else:
+                    self.cltlist_string += '\x00\x00'
+            else:
+                self.cltlist_string += chr(int(cltlist[i]))
+        
+    def packWho(self):  #发送指令包
+        package = struct.pack('<LH',
+                              6,
+                              0x0005)
+        self.packages.append(package)
+        
+    def packEnd(self):
+        package = struct.pack('<LH', 
+                              6, 
+                              0xffff)
         self.packages.append(package)
         
     def packFile(self, path, names):  #down操作包
         import rar
-        rar.compression(path, names)
+        rar.compression('down', path, names)
         print '压缩文件%s'%names
         data = open(r'.\temp\down.rar','rb').read()
-#        package = struct.pack('<IHH8s%ss'%data.__len__(), 
-#                              16 + data.__len__(), 
-#                              0x0003, 
-#                              8, 
-#                              'down.rar', 
-#                              data)
-        package = struct.pack('<IHH', 
+        package = struct.pack('<LHH%ssH', 
                               16 + data.__len__(), 
                               0x0003, 
+                              self.cltlist_string.__len__(), 
+                              self.cltlist_string, 
                               8)
         package += 'down.rar%s'%data
         self.packages.append(package)
 
 if __name__ == '__main__':
-    CONF = Config()
-    cmds = CONF.command()
-    CONF.server()
-    CONF.path()
+    CONF = config.myConfig()
+    cmds = CONF.getCMD
+    CONF.getServer()
+    CONF.getCtrlPath()
     setTime()
     for cmd in cmds:
         MainOperation().operation(cmd)

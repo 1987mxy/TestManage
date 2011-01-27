@@ -1,13 +1,13 @@
 #coding=gbk
+import sys
+sys.path.append('..\\lib')
 
-import SocketServer,os,re,win32file,time,struct
-
+import socket,os,re,win32file,time,struct
 from _winreg import *
 
 IP = None
 LOGGER = None
 PATH = {}
-PORT = None
 
 
 def setLog():
@@ -22,13 +22,13 @@ def setLog():
     logger.addHandler(logging.StreamHandler(stdout))
     return logger
 
-def getIP():
-    inf = os.popen('ipconfig')
-    ipcfg = inf.readlines()
-    for i in xrange(len(ipcfg)):
-        lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])
-        if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i+2]):
-            return lineinf[0]
+#def getIP():
+#    inf = os.popen('ipconfig')
+#    ipcfg = inf.readlines()
+#    for i in xrange(len(ipcfg)):
+#        lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])   
+#        if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i+2]):
+#            return lineinf[0]
 
 def findPath(flag):
     global LOGGER,PATH
@@ -69,32 +69,10 @@ def manageChar(path, char):   #根据通配符得到相应文件列表,uplog时+ip用
         filename.append('%s\\%s'%(spath,re.split(' +', line, 3)[3]))
     return filename
 
-class myConfig(object):
-    def __init__(self):
-        import ConfigParser
-        self.conf = ConfigParser.ConfigParser()
-        self.conf.read('config.ini')
-    
-    def getPort(self):
-        return int(self.conf.get('server', 'port'))    
-    
-    def getPath(self):
-        path = {}
-        for flag in self.conf.options('localpath'):
-            tpath = self.conf.get('localpath', flag)
-            if not os.path.exists(tpath):
-                self.save(flag, '')
-            else:
-                path[flag] = tpath
-        return path
-
-    def save(self,flag,path):
-        self.conf.set('localpath', flag, '%s\\'%path)
-        self.conf.write(open('config.ini','w+'))
-
-class workserver(SocketServer.BaseRequestHandler):
-    def handle(self):
+class ManageClient(object):
+    def __init__(self, sock):
         global PATH, LOGGER
+        self.request = sock
         self.search = ''
         self.logger = LOGGER
         self.spack = ['']
@@ -103,28 +81,31 @@ class workserver(SocketServer.BaseRequestHandler):
         self.result = ''
         self.switch = True
         self.receive()
-        self.do()
-        self.send()
-        if self.search:
-            PATH[self.search]=findPath(self.search)
-        LOGGER.info('='*30)
         
     def send(self):
         for pack in self.spack:
             self.request.sendall(pack)
-        self.request.sendall(struct.pack('<IH', 6, 0xffff))
+        self.request.sendall(struct.pack('<LH', 6, 0xffff))
     
     def receive(self):
         pdata = ''
         while self.switch:
             rdata = self.request.recv(4096)
+            if not rdata:
+                del(CHList[addr])
+                print 'disconnect...', addr
+                self.switch = False
             pdata = self.parseHead(pdata + rdata)
                 
     def parseHead(self, data):
         if len(data) >= 6:
-            head = struct.unpack('<IH', data[:6])
+            head = struct.unpack('<LH', data[:6])
             if head[1] == 0xffff:
-                self.switch = False
+                self.do()
+                self.send()
+                if self.search:
+                    PATH[self.search]=findPath(self.search)
+                LOGGER.info('='*30)
             elif head[0] <= len(data):
                 mdata = data[6:head[0]]
                 data = data[head[0]:]
@@ -209,7 +190,7 @@ class workserver(SocketServer.BaseRequestHandler):
                         runcmd('ren "%s(1)" "%s(2)"'%(tcmd,tcmd))
                         runcmd('copy /y "%s" "%s(1)"'%(self.localpath + flag,tcmd))
                         import rar
-                        rar.decompression(self.localpath) #解压文件
+                        rar.decompression('down', self.localpath) #解压文件
                         self.logger.info('成功下载文件%s'%flag)
                         self.result += '成功下载文件%s\n'%flag
                         self.logger.info('成功解压到%s'%self.localpath)
@@ -223,7 +204,7 @@ class workserver(SocketServer.BaseRequestHandler):
                     elif step == 'update':
                         os.popen(r'del /q /f .\update\*.*')
                         import rar
-                        rar.decompression('.\\update\\') #解压update文件
+                        rar.decompression('down', '.\\update\\') #解压update文件
                         os.system('update.bat')
                     #================自我更新=================
                     #================删除文件=================
@@ -241,7 +222,7 @@ class workserver(SocketServer.BaseRequestHandler):
 
     def packResult(self):  #发送指令包
         self.result += '='*30
-        package = struct.pack('<IH', 
+        package = struct.pack('<LH', 
                               self.result.__len__() + 6, 
                               0x0002)
         package += self.result
@@ -250,8 +231,6 @@ class workserver(SocketServer.BaseRequestHandler):
     def packFile(self, spath, names):  #up操作包
         ns = []
         for n in names:
-            if not n:
-                continue
             if '\\' in n:
                 realn = n.split('\\')[1]
             else:
@@ -262,12 +241,12 @@ class workserver(SocketServer.BaseRequestHandler):
             self.result += '%s%s_%s\n'%(r, self.fip, realn)
         os.system('msg %username% "log已收集,请继续测试!"')
         import rar
-        rar.compression('.\\temp\\', ns)
+        rar.compression('up', '.\\temp\\', ns)
         self.logger.info('成功压缩文件')
         self.result += '成功压缩文件\n'
         data = open(r'.\temp\up.rar','rb').read()
         dname = '%s_up.rar'%self.fip
-        package = struct.pack('<IHH', 
+        package = struct.pack('<LHH', 
                               8 + dname.__len__() + data.__len__(), 
                               0x0003, 
                               dname.__len__())
@@ -277,11 +256,11 @@ class workserver(SocketServer.BaseRequestHandler):
 if __name__ == '__main__':
     os.system('title test_manage')
     LOGGER = setLog()
-    PORT = myConfig().getPort()
-    PATH = myConfig().getPath()
-    IP = getIP()
-    try:
-        server = SocketServer.TCPServer(('',PORT),workserver)
-        server.serve_forever()
-    except Exception, e:
-        LOGGER.error(str(e))
+    conf = config.myConfig()
+    PORT = conf.getPort()
+    SERVER = conf.getServer()
+    PATH = conf.getPath()
+#    IP = getIP()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((SERVER, PORT))
+    ManageClient(sock)
