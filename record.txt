@@ -6,4 +6,12 @@ user new port is 8782
 import stackless and stacklesssocket
 independence rar.py,config.py,compress.py(don't done)
 create settings file is 'settings.py'
-Virtual MessageServer 
+=========================================
+1-28
+debug done
+result:
+	can started war3.exe process
+question:
+	war3 process still life after submit result, script don't running of loop 
+	service stackless channel of all is closed if script is exited, and gmclient request is rejected, service error
+	

@@ -3,24 +3,25 @@ import sys
 sys.path.append('..\\lib')
 
 import socket,os,re,win32file,time,struct
+import log
 from _winreg import *
 
 IP = None
-LOGGER = None
+LOG = None
 PATH = {}
 
 
-def setLog():
-    import logging
-    logger = logging.getLogger()
-    logfile = logging.FileHandler('log.txt', "w")
-    logger.addHandler(logfile)
-    logger.setLevel(logging.DEBUG)
-    _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    logfile.setFormatter(_fmt)
-    from sys import stdout
-    logger.addHandler(logging.StreamHandler(stdout))
-    return logger
+#def setLog():
+#    import logging
+#    logger = logging.getLogger()
+#    logfile = logging.FileHandler('log.txt', "w")
+#    logger.addHandler(logfile)
+#    logger.setLevel(logging.DEBUG)
+#    _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+#    logfile.setFormatter(_fmt)
+#    from sys import stdout
+#    logger.addHandler(logging.StreamHandler(stdout))
+#    return logger
 
 #def getIP():
 #    inf = os.popen('ipconfig')
@@ -71,10 +72,10 @@ def manageChar(path, char):   #根据通配符得到相应文件列表,uplog时+ip用
 
 class ManageClient(object):
     def __init__(self, sock):
-        global PATH, LOGGER
+        global PATH
         self.request = sock
         self.search = ''
-        self.logger = LOGGER
+        self.log = log.run_log()
         self.spack = ['']
         self.rpack = []
         self.localpath = ''
@@ -191,9 +192,9 @@ class ManageClient(object):
                         runcmd('copy /y "%s" "%s(1)"'%(self.localpath + flag,tcmd))
                         import rar
                         rar.decompression('down', self.localpath) #解压文件
-                        self.logger.info('成功下载文件%s'%flag)
+                        self.log.info('成功下载文件%s'%flag)
                         self.result += '成功下载文件%s\n'%flag
-                        self.logger.info('成功解压到%s'%self.localpath)
+                        self.log.info('成功解压到%s'%self.localpath)
                         self.result += '成功解压到%s\n'%self.localpath
                     #================下载文件=================
                     #================CMD命令=================
@@ -217,7 +218,7 @@ class ManageClient(object):
                     #================删除文件=================
             self.result = '%s: done\n%s\n%s\n'%(self.fip, self.localpath, self.result)
         except Exception, e:
-            self.logger.error(str(e))
+            self.log.error(str(e))
             self.result = '%s error:%s\n%s\n%s\n'%(self.fip, str(e), self.localpath, self.result)
 
     def packResult(self):  #发送指令包
@@ -242,7 +243,7 @@ class ManageClient(object):
         os.system('msg %username% "log已收集,请继续测试!"')
         import rar
         rar.compression('up', '.\\temp\\', ns)
-        self.logger.info('成功压缩文件')
+        self.log.info('成功压缩文件')
         self.result += '成功压缩文件\n'
         data = open(r'.\temp\up.rar','rb').read()
         dname = '%s_up.rar'%self.fip
@@ -255,7 +256,6 @@ class ManageClient(object):
 
 if __name__ == '__main__':
     os.system('title test_manage')
-    LOGGER = setLog()
     conf = config.myConfig()
     PORT = conf.getPort()
     SERVER = conf.getServer()
