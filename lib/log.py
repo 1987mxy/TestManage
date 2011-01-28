@@ -29,7 +29,7 @@ def error_log():
     lpath = _pathrule('error')
     logfile = logging.FileHandler(lpath, "w")
     logfile.setLevel(logging.ERROR)
-    fmt = logging.Formatter("%(asctime)s - %(message)s")
+    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     logfile.setFormatter(fmt)
     elog.addHandler(logfile)
     return elog
