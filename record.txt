@@ -14,4 +14,7 @@ result:
 question:
 	war3 process still life after submit result, script don't running of loop 
 	service stackless channel of all is closed if script is exited, and gmclient request is rejected, service error
+=========================================
+1-28
+fixed bug:service stackless channel of all is closed if script is exited, and gmclient request is rejected, service error
 	
