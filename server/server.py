@@ -76,14 +76,19 @@ class net(object):
 
     def threadBroadcast(self):
         while self.switch:
-            rdata = self.broadcast.receive()
-            LOG.debug('%s:%s send %s'%(self.address[0], self.address[1], rdata.__repr__()))
-            self.sock.sendall(rdata)
+            try:
+                rdata = self.broadcast.receive()
+                self.sock.sendall(rdata)
+                LOG.debug('%s:%s send %s'%(self.address[0], self.address[1], rdata.__repr__()))
+            except Exception, e:
+                if e.args() == 9:
+                    LOG.error('Socket has be closed! Send package failed: %s'%rdata.__repr__())
+                else:
+                    LOG.error(e.message())
             
     def exit(self):
         addr = '%s:%s'%self.address
-        self.broadcast.close()
-        self.net_to_parse.close()
+        self.net_to_parse.send('exit')
         if addr in CHList.keys():
             del(CHList[addr])
         self.switch = False
@@ -183,69 +188,69 @@ class virtualMessage(object):
     
     def listen_message(self):
         while self.switch:
-            package = self.net_to_parse.receive()
-            if package == 'exit':
-                if self.uid and self.uid in CHList.keys():
-                    if self.do_logout():
-                        break
-            mdata = package[2]
-            cmd = struct.unpack("<H", mdata[8 : 10])[0]
-            LOG.debug('%x'%cmd)
-            if cmd == 0x7001:
-                msg = Msg()
-                self.broadcast.send(self.make_response_app(0))
-                receivers_len = struct.unpack("<H", mdata[14 : 16])[0]
-                receivers_string = mdata[16 : receivers_len * 4 + 16]
-                mdata = mdata[receivers_len * 4 + 16 : ]
-                LOG.debug(mdata.__repr__())
-                #msg.ParseFromString(mdata)
-                #LOG.debug(msg)
-                LOG.debug('receivers_len:%s'%receivers_len)
-                receivers_list = struct.unpack('<%sL'%receivers_len, receivers_string)
-                for receiver in receivers_list:
-                    LOG.debug('receiver:%s'%receiver.__repr__())
-                    if receiver in CHList.keys():
-                        for ch in CHList[receiver]:
-                            ch.send(self.make_transfer(mdata))
-            elif cmd == 0x9001:
-                pbr = Response()
-                from protobuf.soc_login_pb2 import SocketLoginMessage
-                msg = SocketLoginMessage()
-                msg.ParseFromString(mdata[14:])
-                LOG.debug(msg)
-                if msg.code == 1:
-                    if msg.userName in LoginInfo.keys():    #virtual login
-                        self.user = msg.userName
-                        mdata = LoginInfo[msg.userName]
-                        LOG.debug(mdata.__repr__())
-                        pbr.ParseFromString(mdata)
-                        self.uid = pbr.userTCPLogin.uid
-                        self.sid = pbr.userTCPLogin.sid
-                        CHList[self.uid].append(self.broadcast)
-                    else:
-                        url = '%s/user.tcplogin/?alt=pbbin&username=%s&password=%s&service=msg'%(APPSERVER, 
-                                                                                                msg.userName, 
-                                                                                                msg.password)
-                        LOG.debug(url)
-                        mdata = urllib.urlopen(url).read()
-                        LOG.debug(mdata.__repr__())
-                        pbr.ParseFromString(mdata)
-                        LOG.debug(pbr)
-                        if pbr.code == 200000:
+            try:
+                package = self.net_to_parse.receive()
+                if package == 'exit':
+                    if self.uid and self.uid in CHList.keys():
+                        self.do_logout()
+                    break
+                mdata = package[2]
+                cmd = struct.unpack("<H", mdata[8 : 10])[0]
+                LOG.debug('%x'%cmd)
+                if cmd == 0x7001:
+                    msg = Msg()
+                    self.broadcast.send(self.make_response_app(0))
+                    receivers_len = struct.unpack("<H", mdata[14 : 16])[0]
+                    receivers_string = mdata[16 : receivers_len * 4 + 16]
+                    mdata = mdata[receivers_len * 4 + 16 : ]
+                    LOG.debug(mdata.__repr__())
+                    LOG.debug('receivers_len:%s'%receivers_len)
+                    receivers_list = struct.unpack('<%sL'%receivers_len, receivers_string)
+                    for receiver in receivers_list:
+                        LOG.debug('receiver:%s'%receiver.__repr__())
+                        if receiver in CHList.keys():
+                            for ch in CHList[receiver]:
+                                ch.send(self.make_transfer(mdata))
+                elif cmd == 0x9001:
+                    pbr = Response()
+                    from protobuf.soc_login_pb2 import SocketLoginMessage
+                    msg = SocketLoginMessage()
+                    msg.ParseFromString(mdata[14:])
+                    LOG.debug(msg)
+                    if msg.code == 1:
+                        if msg.userName in LoginInfo.keys():    #virtual login
                             self.user = msg.userName
+                            mdata = LoginInfo[msg.userName]
+                            LOG.debug(mdata)
+                            pbr.ParseFromString(mdata)
                             self.uid = pbr.userTCPLogin.uid
                             self.sid = pbr.userTCPLogin.sid
-                            CHList[self.uid] = [self.broadcast]
-                            LoginInfo[msg.userName] = mdata
-                            LOG.debug('%s_%s Login'%(self.user,self.uid))
+                            CHList[self.uid].append(self.broadcast)
                         else:
-                            LOG.debug('%s_%s Login error:%s'%(self.user,self.uid,pbr))
-                    self.broadcast.send(self.make_response_clt(mdata))
-                elif msg.code == 3:
-                    self.do_logout()
-            elif cmd == 0x9006:
-                pass
-        
+                            url = '%s/user.tcplogin/?alt=pbbin&username=%s&password=%s&service=msg'%(APPSERVER, 
+                                                                                                    msg.userName, 
+                                                                                                    msg.password)
+                            LOG.debug(url)
+                            mdata = urllib.urlopen(url).read()
+                            LOG.debug(mdata)
+                            pbr.ParseFromString(mdata)
+                            LOG.debug(pbr)
+                            if pbr.code == 200000:
+                                self.user = msg.userName
+                                self.uid = pbr.userTCPLogin.uid
+                                self.sid = pbr.userTCPLogin.sid
+                                CHList[self.uid] = [self.broadcast]
+                                LoginInfo[msg.userName] = mdata
+                                LOG.debug('%s_%s Login'%(self.user,self.uid))
+                            else:
+                                LOG.debug('%s_%s Login error:%s'%(self.user,self.uid,pbr))
+                        self.broadcast.send(self.make_response_clt(mdata))
+                    elif msg.code == 3:
+                        self.do_logout()
+                elif cmd == 0x9006:  #return 0x9008 heart for flash
+                    pass
+            except Exception, e:
+                LOG.error(str(e)+str(dir(e)))
 
     def do_logout(self):
         pbr = Response()
@@ -253,21 +258,21 @@ class virtualMessage(object):
                                                      self.sid)
         mdata = urllib.urlopen(url).read()
         pbr.ParseFromString(mdata)
-        self.broadcast.send(self.make_response_clt(mdata))
+        for ch in CHList[self.uid]:
+            ch.send(self.make_response_clt(mdata))
         if pbr.code == 200000:
             del(CHList[self.uid])
             del(LoginInfo[self.user])
             self.switch = False
             LOG.debug('%s_%s Logout'%(self.user,self.uid))
-            return 1
+            self.broadcast.close()
+            self.net_to_parse.close()
         else:
             LOG.debug('%s_%s Logout error:%s'%(self.user,self.uid,pbr))
-            return 0
 
     def make_response_app(self, response_code):   
         #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4), response_code(2)
         message_pack_header_def='<HLHHLH'
-    
         pack = struct.pack(message_pack_header_def,
                            struct.calcsize(message_pack_header_def) -2,
                            0xABCD,
@@ -278,33 +283,27 @@ class virtualMessage(object):
         return pack
     
     def make_response_clt(self, encoded):  #logined
-        content = encoded
-    
         #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4)
         message_pack_header_def='<HLHHL'
-    
         pack = '%s%s'%(struct.pack(message_pack_header_def,
-                                   struct.calcsize(message_pack_header_def) -2 +len(content),
+                                   struct.calcsize(message_pack_header_def) -2 +len(encoded),
                                    0xABDE,
-                                   struct.calcsize(message_pack_header_def) -2 +len(content),
+                                   struct.calcsize(message_pack_header_def) -2 +len(encoded),
                                    0x9002,
                                    0),
                        content)
         return pack
     
     def make_transfer(self, encoded):
-        content = encoded
         #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4)
         message_pack_header_def='<HLHHL'
-    
         pack = "%s%s" %(struct.pack(message_pack_header_def,
-                                    struct.calcsize(message_pack_header_def) -2 +len(content),
+                                    struct.calcsize(message_pack_header_def) -2 +len(encoded),
                                     0xABDE,
-                                    struct.calcsize(message_pack_header_def) -2 +len(content),
+                                    struct.calcsize(message_pack_header_def) -2 +len(encoded),
                                     0x9003,
                                     0),
-                        content,
-                        )
+                        content)
         return pack
 
 def cltthread():
