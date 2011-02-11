@@ -17,4 +17,9 @@ question:
 =========================================
 1-28
 fixed bug:service stackless channel of all is closed if script is exited, and gmclient request is rejected, service error
-	
+=========================================
+2-15
+debug test_manage use done
+add heart rule
+the server.py runing in 58.196.146.37
+=========================================

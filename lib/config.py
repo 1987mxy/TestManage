@@ -1,10 +1,9 @@
 #coding=gbk
 import os
-
+import ConfigParser
 
 class myConfig(object):
     def __init__(self):
-        import ConfigParser
         self.conf = ConfigParser.ConfigParser()
         self.conf.read('config.ini')
     

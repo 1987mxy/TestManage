@@ -1,38 +1,31 @@
 #coding=gbk
-import sys
-sys.path.append('..\\lib')
+#import sys
+#sys.path.append('..\\lib')
 
 import socket,os,re,win32file,time,struct
 import log
+import config
 from _winreg import *
+
+import logging
+import ConfigParser
 
 IP = None
 LOG = None
 PATH = {}
+CONF = None
 
-
-#def setLog():
-#    import logging
-#    logger = logging.getLogger()
-#    logfile = logging.FileHandler('log.txt', "w")
-#    logger.addHandler(logfile)
-#    logger.setLevel(logging.DEBUG)
-#    _fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-#    logfile.setFormatter(_fmt)
-#    from sys import stdout
-#    logger.addHandler(logging.StreamHandler(stdout))
-#    return logger
-
-#def getIP():
-#    inf = os.popen('ipconfig')
-#    ipcfg = inf.readlines()
-#    for i in xrange(len(ipcfg)):
-#        lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])   
-#        if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i+2]):
-#            return lineinf[0]
+def getIP():
+    inf = os.popen('ipconfig')
+    ipcfg = inf.readlines()
+    for i in xrange(len(ipcfg)):
+        lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])   
+        if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i+2]):
+            return lineinf[0]
 
 def findPath(flag):
-    global LOGGER,PATH
+    global LOG,PATH,CONF
+    LOG.info('sreach file ...')
     r = win32file.GetLogicalDrives()
     for d in range(2,27):
         if(r>>d&1):
@@ -41,25 +34,23 @@ def findPath(flag):
             for localpath,fields,files in os.walk(drive):
                 if flag in files:
                     if open(r'%s\%s'%(localpath, flag), 'r').read() == '95279527':
-                        LOGGER.info('localpath: %s\\'%localpath)
-                        myConfig().save(flag, localpath)
+                        CONF.save(flag, localpath)
                         PATH[flag] = localpath
-                        print '%s\\'%localpath
+                        LOG.info('localpath: %s\\'%localpath)
                         return '%s\\'%localpath
-    LOGGER.info('localpath: path is none!')
+    LOG.info('localpath: path is none!')
     return ''
 
 def runcmd(command):
-    global LOGGER
+    global LOG
     result = os.popen(command)
     result = result.read()
     strlog = '[%s]%s'%(command, result)
-    LOGGER.info(strlog)
+    LOG.info(strlog)
     return result
 
 def manageChar(path, char):   #根据通配符得到相应文件列表,uplog时+ip用
     filename = []
-    print char.__repr__()
     if '\\' in char:
         spath = re.split(r'\\', char)[0]
     else:
@@ -72,53 +63,87 @@ def manageChar(path, char):   #根据通配符得到相应文件列表,uplog时+ip用
 
 class ManageClient(object):
     def __init__(self, sock):
-        global PATH
+        global PATH, LOG
         self.request = sock
+        self.e_pack = self.packEnd()
+        self.reset()
+        self.receive()
+        
+        
+    def send(self):
+        for pack in self.spack:
+            self.request.sendall(pack)
+            LOG.debug('send to Service : %s'%pack.__repr__())
+    
+    def close(self):
+        self.switch = False
+        self.request.close()
+    
+    def reset(self):
+        self.file = None
         self.search = ''
-        self.log = log.run_log()
         self.spack = ['']
         self.rpack = []
         self.localpath = ''
         self.result = ''
         self.switch = True
-        self.receive()
-        
-    def send(self):
-        for pack in self.spack:
-            self.request.sendall(pack)
-        self.request.sendall(struct.pack('<LH', 6, 0xffff))
     
     def receive(self):
         pdata = ''
         while self.switch:
             rdata = self.request.recv(4096)
+            LOG.debug('receive raw_string from Service : %s'%rdata.__repr__())
             if not rdata:
-                del(CHList[addr])
-                print 'disconnect...', addr
-                self.switch = False
-            pdata = self.parseHead(pdata + rdata)
+                LOG.error('disconnect...')
+                self.close()
+            else:
+                pdata = self.parseHead(pdata + rdata)
                 
     def parseHead(self, data):
         if len(data) >= 6:
             head = struct.unpack('<LH', data[:6])
             if head[1] == 0xffff:
+                LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
+                                                         head[1]))
+                LOG.debug('received package from Service : %s'%data[:head[0]].__repr__())
                 self.do()
                 self.send()
                 if self.search:
                     PATH[self.search]=findPath(self.search)
-                LOGGER.info('='*30)
-            elif head[0] <= len(data):
-                mdata = data[6:head[0]]
+                LOG.info('='*30)
+                self.reset()
                 data = data[head[0]:]
-                self.rpack.append([head[0], head[1], mdata])
-                self.parseHead(data)
+            if head[0] <= len(data):
+                mdata = data[:head[0]]
+                data = data[head[0]:]
+                if head[1] == 0x0006:
+                    self.request.send(mdata)
+                    LOG.debug('send to Service : %s'%mdata.__repr__())
+                elif head[1] != 0xffff:
+                    self.rpack.append([head[0], head[1], mdata])
+                    LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
+                                                             head[1]))
+                    LOG.debug('received package from Service : %s'%mdata.__repr__().__len__())
+                data = self.parseHead(data)
         return data
     
     def do(self):
+        flen = 0
         global IP, PATH
         for len, type, data in self.rpack:
+            if type == 0x0003:
+                if self.file:
+                    self.file.write(data[6:])
+                else:
+                    self.file = open(r'.\temp\down.rar','wb')
+                    self.file.write(data[6:])
+                flen += data.__len__()
+        if self.file:
+            LOG.info('receive filesize is %s'%flen)
+            self.file.close()
+        for len, type, data in self.rpack:
             if type == 0x0001:
-                data = self.readData(data)
+                data = self.readData(data[6:])
                 if data['ip'] == IP:
                     self.fip = IP
                 else:
@@ -137,14 +162,9 @@ class ManageClient(object):
                     if not data['localpath'] in PATH.keys():
                         PATH[data['localpath']]=''
                     self.operation(data)
-            elif type == 0x0003:
-#                filelen = len - 16  #文件大小
-#                mdata = struct.unpack('<%ss'%filelen, data[10:]) #文件内容
-                file = open(r'.\temp\down.rar','wb')
-#                file.write(mdata[0])
-                file.write(data[10:])
-                file.close()
+        
         self.packResult()
+        self.spack.append(self.e_pack)
 
     #================解析数据报=================
     def readData(self,data):
@@ -191,10 +211,10 @@ class ManageClient(object):
                         runcmd('ren "%s(1)" "%s(2)"'%(tcmd,tcmd))
                         runcmd('copy /y "%s" "%s(1)"'%(self.localpath + flag,tcmd))
                         import rar
-                        rar.decompression('down', self.localpath) #解压文件
-                        self.log.info('成功下载文件%s'%flag)
+                        LOG.info('成功下载文件%s'%flag)
                         self.result += '成功下载文件%s\n'%flag
-                        self.log.info('成功解压到%s'%self.localpath)
+                        LOG.debug(rar.decompression('down', self.localpath)) #解压文件
+                        LOG.info('成功解压到%s'%self.localpath)
                         self.result += '成功解压到%s\n'%self.localpath
                     #================下载文件=================
                     #================CMD命令=================
@@ -205,7 +225,7 @@ class ManageClient(object):
                     elif step == 'update':
                         os.popen(r'del /q /f .\update\*.*')
                         import rar
-                        rar.decompression('down', '.\\update\\') #解压update文件
+                        LOG.debug(rar.decompression('down', '.\\update\\')) #解压update文件
                         os.system('update.bat')
                     #================自我更新=================
                     #================删除文件=================
@@ -216,11 +236,11 @@ class ManageClient(object):
                         else:
                             self.result += '成功删除%s\n'%flag
                     #================删除文件=================
-            self.result = '%s: done\n%s\n%s\n'%(self.fip, self.localpath, self.result)
+            self.result = '%s : done\n%s\n%s\n'%(self.fip, self.localpath, self.result)
         except Exception, e:
-            self.log.error(str(e))
-            self.result = '%s error:%s\n%s\n%s\n'%(self.fip, str(e), self.localpath, self.result)
-
+            LOG.error(str(e))
+            self.result = '%s error : %s\n%s\n%s\n'%(self.fip, str(e), self.localpath, self.result)
+    
     def packResult(self):  #发送指令包
         self.result += '='*30
         package = struct.pack('<LH', 
@@ -231,36 +251,60 @@ class ManageClient(object):
 
     def packFile(self, spath, names):  #up操作包
         ns = []
+        PACKAGE_SIZE = 600
         for n in names:
             if '\\' in n:
                 realn = n.split('\\')[1]
             else:
                 realn = n
             ns.append('%s_%s'%(self.fip, realn))
-            r = runcmd(r'copy /y "%s" ".\temp\%s_%s"'%(spath + n, self.fip, realn))
+            r = runcmd(r'copy /y "%s%s" ".\temp\%s_%s"'%(spath, n, self.fip, realn))
             r = r[:r.__len__()-1]
             self.result += '%s%s_%s\n'%(r, self.fip, realn)
         os.system('msg %username% "log已收集,请继续测试!"')
         import rar
-        rar.compression('up', '.\\temp\\', ns)
-        self.log.info('成功压缩文件')
+        LOG.debug(rar.compression('up', '.\\temp\\', ns))
+        LOG.info('成功压缩文件')
         self.result += '成功压缩文件\n'
         data = open(r'.\temp\up.rar','rb').read()
-        dname = '%s_up.rar'%self.fip
-        package = struct.pack('<LHH', 
-                              8 + dname.__len__() + data.__len__(), 
-                              0x0003, 
-                              dname.__len__())
-        package += (dname + data)
+        dname = '%s_up'%self.fip
+        filepack_handler = '%s%s'%(struct.pack('<LHH', 
+                                               8 + dname.__len__() + PACKAGE_SIZE, 
+                                               0x0004, 
+                                               dname.__len__()), 
+                                   dname)
+        filepack_len = data.__len__()/PACKAGE_SIZE
+        for i in range(filepack_len):
+            package = '%s%s'%(filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE])
+            self.spack.append(package)
+        package = '%s%s'%(struct.pack('<LHH', 
+                                      8 + data.__len__() - filepack_len * PACKAGE_SIZE + dname.__len__(), 
+                                      0x0004,
+                                      dname.__len__()),
+                          dname)
+        package += data[filepack_len * PACKAGE_SIZE:]
         self.spack.append(package)
+    
+    def packEnd(self):
+        return '\x06\x00\x00\x00\x00\xff'
 
 if __name__ == '__main__':
     os.system('title test_manage')
-    conf = config.myConfig()
-    PORT = conf.getPort()
-    SERVER = conf.getServer()
-    PATH = conf.getPath()
-#    IP = getIP()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((SERVER, PORT))
-    ManageClient(sock)
+    log.run_log()
+    LOG = log.error_log()
+    CONF = config.myConfig()
+    PORT = CONF.getPort()
+    SERVER = CONF.getServer()
+    PATH = CONF.getCltPath()
+    IP = getIP()
+    while 1:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            LOG.info('connecting ...')
+            sock.connect((SERVER, PORT))
+            sock.settimeout(30)
+            ManageClient(sock)
+        except Exception, e:
+            LOG.error(str(e))
+            time.sleep(10)
+            LOG.info('reconnecting ...')

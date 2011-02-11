@@ -9,7 +9,7 @@ def _pathrule(type):
     time = strftime('%Y-%m-%d %H_%M_%S',localtime())
     if not path.exists("log"):
         mkdir("log")
-    return r'.\log\%s %s.log'%(time,type)
+    return r'./log/%s_%s.log'%(time,type)
     
 def run_log():
     rlog = logging.getLogger('runlog')
@@ -21,7 +21,9 @@ def run_log():
     logfile.setFormatter(fmt)
     rlog.addHandler(logfile)
     if settings.PRINT_RUNLOG and settings.PRINT_LOG:
-        rlog.addHandler(logging.StreamHandler(sys.stdout))  #print to screen
+        display = logging.StreamHandler(sys.stdout)
+        display.setLevel(logging.INFO)
+        rlog.addHandler(display)  #print to screen
     return rlog
     
 def error_log():
@@ -44,5 +46,7 @@ def performance_log():
     logfile.setFormatter(fmt)
     plog.addHandler(logfile)
     if settings.PRINT_PERFORMANCELOG and settings.PRINT_LOG:
-        plog.addHandler(logging.StreamHandler(sys.stdout))  #print to scree
+        display = logging.StreamHandler(sys.stdout)
+        display.setLevel(logging.INFO)
+        plog.addHandler(display)  #print to scree
     return plog
