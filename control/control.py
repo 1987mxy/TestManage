@@ -7,11 +7,15 @@ import config
 from datetime import datetime
 import socket
 import struct
+import log
+import rar
+import re
 
 from settings import *
 
+
 PATH = {}
-SRVS = {}
+LOG = None
 CONF = None
 TIME = ''
 OTHER = ''
@@ -22,12 +26,9 @@ def setTime():
     TIME = str(datetime.now())
     TIME = sub(':', '_', TIME)
 
-
-        
 class NetOperation(object):
     def __init__(self, packages):
-        global SERVER
-        self.outtime = 0
+        global SERVER, PORT
         self.pdata = ''
         self.rpack = []
         self.spack = packages
@@ -41,71 +42,74 @@ class NetOperation(object):
         self.socket.settimeout(120)
         
     def close(self):
+        self.switch = False
         self.socket.close()
         
     def send(self):
         for pack in self.spack:
             self.socket.sendall(pack)
+            LOG.debug('send to Serivce : %s'%pack.__repr__())
         
     def receive(self):
-        if self.switch:
+        while self.switch:
             rdata = self.socket.recv(4096)
-            print rdata.__repr__()
-            self.outtime = 0
-            if rdata == '':
-                print '%s_%s socket is closed!\n'%(SERVER, self.port)
-                self.socket.close()
-                self.switch = False
+            if not rdata:
+                LOG.error('%s_%s socket is closed!\n'%(SERVER, PORT))
+                self.close()
             else:
+                LOG.debug('receive raw_string : %s'%rdata.__repr__())
                 self.pdata = self.parseHead(self.pdata + rdata)
                 
     def parseHead(self, data):
         if len(data) >= 6:
             head = struct.unpack('<LH', data[:6])
-            if head[1] == 0xffff:
-                self.socket.close()
-                self.switch = False
-                print '%s receive data done!\n'%SERVER
-            elif head[0] <= len(data):
+            if head[1] == 0xff00:
+                self.close()
+                LOG.info('%s receive data done!\n'%SERVER)
+            if head[0] <= len(data):
                 mdata = data[6:head[0]]
                 data = data[head[0]:]
-                self.rpack.append([head[0], head[1], mdata])
+                if head[1] != 0xff00:
+                    self.rpack.append([head[0], head[1], mdata])
+                    LOG.info('received handler : [%d, %2x]'%(head[0], 
+                                                             head[1]))
+                    LOG.debug('received package : %s'%mdata.__repr__())
                 data = self.parseHead(data)
         return data
     
     def runCommand(self):
         for len, type, data in self.rpack:
             if type == 0x0002:  #对指令的结果反馈
-#                datalen = len - 6
-#                mdata = struct.unpack('<%ss'%datalen, data)[0]     
-#                print mdata
-                print data
-            elif type == 0x0003:
+                LOG.info(data)
+            elif type == 0x0004:
                 global PATH
                 if not os.path.exists(PATH['logpath']):  #log目录是否存在
                     os.popen('mkdir "%s"'%PATH['logpath'])
                 namelen = struct.unpack('<H',data[:2])[0]   #log文件名长度
-#                filelen = len - 8 - namelen #log文件大小
-#                mdata = struct.unpack('<%ss%ss'%(namelen, filelen), data[2:]) #log内容
                 mdata = [data[2:namelen + 2],data[namelen + 2:]]
-                file = open(r'.\temp\%s'%mdata[0],'wb')
+                file = open(r'.\temp\%s.rar'%mdata[0],'wb')
                 file.write(mdata[1])
                 file.close()
                 import rar
-                rar.decompression('up',mdata[0], PATH['logpath']) #解压log
-                print '解压%s到%s\n'%(mdata[0], PATH['logpath'])
+                rar.decompression(mdata[0], PATH['logpath']) #解压log
+                LOG.info('解压%s到%s\n'%(mdata[0], PATH['logpath']))
             
 class MainOperation(object):
     def __init__(self):
-        global SERVER
+        global SERVER,PATH
         self.packages = []
         self.cltlist_string = ''
-        
+
     def operation(self, cmdline):
         global OTHER
-        cmds = cmdline.split(' ')
-        dtldata = CONF.getList(cmds[0])
+        cmds = cmdline.split(' ')   #分割参数
+        dtldata = CONF.getList(PATH, cmds[0])
         step = dtldata['step'].split('|')
+        if 'who' in step:
+            self.packWho()
+        else:
+            cmdpack = self.makePocket(dtldata)
+            self.packCmd(cmdpack)
         if 'up' in step:
             dtldata['logpath'] += TIME + '_' + cmds[1] + '\\'
             OTHER = 'up'
@@ -115,47 +119,23 @@ class MainOperation(object):
         if 'update' in step:
             self.packFile(PATH['filepath'] + 'update\\', ['*.*'])
             OTHER = 'update'
-        if 'who' in step:
-            self.packWho()
-        cmdpack = self.makePocket(dtldata)
-        self.packCmd(cmdpack)
         self.packEnd()
-        terms = []
         try:
             t = NetOperation(self.packages)
-            terms.append(t)
             t.connect()
             t.send()
-            t.socket.settimeout(1)
+            t.socket.settimeout(300)
+            if OTHER == 'update':
+                t.close()
+            else:
+                t.receive()
+            t.runCommand()
         except Exception, e:
-            t.switch = False
-            print 'Service:%s\n'%str(e)
-        cont = True;
-        while cont:
-            cont = False
-            for t in terms:
-                try:
-                    if OTHER == 'update':
-                        t.close()
-                        break
-                    else:
-                        t.receive()
-                except Exception, e:
-                    if not e.message == 'timed out':
-                        t.switch = False
-                        print '%s:%s\n'%(SERVER, str(e))
-                    else:
-                        t.outtime += 1
-                        if t.outtime > 30:
-                            t.switch = False
-                            print '%s: time out!'%SERVER
-                if t.switch:
-                    cont = t.switch
-        for t in terms:
-            try:
-                t.runCommand()
-            except Exception, e:
-                print '%s:%s\n'%(SERVER, str(e))
+            if e.message != 'timed out':
+                LOG.error('%s:%s\n'%(SERVER, str(e)))
+            else:
+                LOG.error('%s: time out!'%SERVER)
+            t.close()
         if OTHER == 'up':
             os.system('explorer "' + PATH['logpath'] + '"')
 
@@ -164,7 +144,6 @@ class MainOperation(object):
         pocket = ''
         for key in dtldata.keys():
             pocket += key + ':' + dtldata[key] + '<'
-#        pocket += 'ip:' + SRVS['list']
         return pocket
 
     def packCmd(self, pocket):  #发送指令包
@@ -177,17 +156,21 @@ class MainOperation(object):
         self.packages.append(package)
         
     def getCltString(self):
-        global CTRLS
-        cltlist = re.split('[|:.]', CTRLS['list'])
+        from re import split
+        cltlist = split('[|:.]', PATH['list'])
         self.cltlist_string = ''
-        for i in range(cltlist):
-            if (i+1)%5 == 0:
-                if cltlist[i]:
-                    self.cltlist_string += chr(int(cltlist[i])/256) + chr(int(cltlist[i])%256)
-                else:
-                    self.cltlist_string += '\x00\x00'
+        for i in range(0, cltlist.__len__(), 5):
+            self.cltlist_string = '%s%s%s%s%s'%(self.cltlist_string,
+                                                chr(int(cltlist[i])),
+                                                chr(int(cltlist[i+1])),
+                                                chr(int(cltlist[i+2])),
+                                                chr(int(cltlist[i+3])))
+            if cltlist[i+4]:
+                self.cltlist_string = '%s%s%s'%(self.cltlist_string,
+                                                chr(int(cltlist[i])/256),
+                                                chr(int(cltlist[i])%256))
             else:
-                self.cltlist_string += chr(int(cltlist[i]))
+                self.cltlist_string = '%s\x00\x00'%self.cltlist_string
         
     def packWho(self):  #发送指令包
         package = struct.pack('<LH',
@@ -202,24 +185,23 @@ class MainOperation(object):
         self.packages.append(package)
         
     def packFile(self, path, names):  #down操作包
-        import rar
         rar.compression('down', path, names)
-        print '压缩文件%s'%names
+        LOG.debug('压缩文件%s'%names)
         data = open(r'.\temp\down.rar','rb').read()
-        package = struct.pack('<LHH%ssH', 
-                              16 + data.__len__(), 
-                              0x0003, 
-                              self.cltlist_string.__len__(), 
-                              self.cltlist_string, 
-                              8)
-        package += 'down.rar%s'%data
+        package = struct.pack('<LH', 
+                              6 + data.__len__(), 
+                              0x0003)
+        package += data
         self.packages.append(package)
 
 if __name__ == '__main__':
+    log.run_log()
+    LOG = log.error_log()
     CONF = config.myConfig()
-    cmds = CONF.getCMD
-    CONF.getServer()
-    CONF.getCtrlPath()
+    cmds = CONF.getCMD()
+    SERVER = CONF.getServer()
+    PORT = CONF.getPort()
+    PATH = CONF.getCtrlPath()
     setTime()
     for cmd in cmds:
         MainOperation().operation(cmd)
