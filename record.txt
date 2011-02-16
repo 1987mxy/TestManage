@@ -23,3 +23,6 @@ debug test_manage use done
 add heart rule
 the server.py runing in 58.196.146.37
 =========================================
+2-16
+create package.py and make test_manage data package
+=========================================

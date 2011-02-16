@@ -2,6 +2,8 @@
 import os
 import ConfigParser
 
+CONF = None
+
 class myConfig(object):
     def __init__(self):
         self.conf = ConfigParser.ConfigParser()
@@ -42,3 +44,5 @@ class myConfig(object):
     def getList(self, path, cmd):
         path.update(dict(self.conf.items(cmd)))
         return path
+    
+CONF = myConfig()

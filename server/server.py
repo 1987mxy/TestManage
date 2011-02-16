@@ -1,32 +1,33 @@
 #coding=gbk
-#import sys
-#sys.path.append('..\\lib')
 
-import urllib
-import stackless
-import re
-import struct
-import log
-import stacklesssocket
+import sys
+sys.path.append('..\\lib')
+
+import urllib, stackless, re, struct
+
+from log import LOG
+import package
 from settings import *
 
 from protobuf.msg_base_pb2 import Msg
 from protobuf.res_base_pb2 import Response
-
 from protobuf.soc_login_pb2 import SocketLoginMessage
-
+import stacklesssocket
 import scheduler
 
 RUN = True
-CHList = {}
-CLTLIST = []
-LoginInfo = {}
-CONTROL = None
-APPSRV = None
-LOG = None
 
-SLEEP = scheduler.DelayScheduler()
+CHList = {}   #链接上此服务器的client的广播channel列表
+CLTLIST = []   #一次case的client列表由0x0001包中获得
+CONTROL = None  #一次case的控制端的广播channel
+
+LoginInfo = {}  #虚拟登录时返回的登录信息
+APPSRV = None
+
+SLEEP = scheduler.DelayScheduler()  #stackless的sleep
 SLEEP.start()
+
+
 
 class net(object):
     def __init__(self, sock, addr):
@@ -114,8 +115,8 @@ class net(object):
                 else:
                     self.sock.sendall(rdata)
                     LOG.debug('send to %s : %s : %s'%(self.address[0], 
-                                                        self.address[1], 
-                                                        rdata.__repr__().__len__()))
+                                                      self.address[1], 
+                                                      rdata.__repr__().__len__()))
             except Exception, e:
                 LOG.error('%s : %s broadcast error...'%self.address)
                 if e.args == 9:
@@ -159,6 +160,7 @@ class net(object):
 
 class testManage(object):
     def __init__(self, broadcast, net_to_parse, address):
+        self.e_pack = package.packCtrlEnd()
         self.net_to_parse = net_to_parse
         self.broadcast = broadcast
         self.address = address
@@ -168,8 +170,8 @@ class testManage(object):
     def listen_message(self):
         global CLTLIST, CONTROL, LOG
         while self.switch:
-            package = self.net_to_parse.receive()
-            if package == 'exit':
+            r_pack = self.net_to_parse.receive()
+            if r_pack == 'exit':
                 self.switch = False
                 if '%s:%s'%self.address in CHList.keys():
                     del(CHList['%s:%s'%self.address])
@@ -180,45 +182,45 @@ class testManage(object):
                 LOG.info('%s : %s test_manage exit...'%self.address)
                 break
             result = ''
-            if package[1] == 0x0001:
+            if r_pack[1] == 0x0001:
                 CONTROL = self.broadcast
                 del(CHList['%s:%s'%self.address])
-                s_pack = self.getCltList(package)
+                s_pack = self.getCltList(r_pack)
                 for ip in self.cltlist:
                     fail = True
                     for addr in CHList.keys():
                         if ':' in ip and ip == addr:
                             CLTLIST.append(ip)
-                            CHList[ip].send('%sip:%s'%(s_pack, self.myIP(re.split(':', ip)[0])))
+                            CHList[ip].send('%sip:%s'%(s_pack, self._myIP(re.split(':', ip)[0])))
                             LOG.info('send to %s'%ip)
                             fail = False
                             break
                         elif (not ':' in ip) and ip in addr:
                             CLTLIST.append(addr)
-                            CHList[addr].send('%sip:%s'%(s_pack, self.myIP(ip)))
+                            CHList[addr].send('%sip:%s'%(s_pack, self._myIP(ip)))
                             LOG.info('send to %s'%addr)
                             fail = False
                     if fail:
-                        result += '%s connecting faild...\n'%ip
-                        s_pack = self.packResult(result)
+                        result = '%s%s connecting faild...\n'%(result, ip)
+                        s_pack = package.pack2(result)
                         self.broadcast.send(s_pack)
                 if not CLTLIST:
-                    CONTROL.send(self.packEnd())
-            elif package[1] in [0x0002, 0x0004]:
-                CONTROL.send(package[2])
-            elif package[1] in [0x0003, 0xffff]:
-                self.dispense(package[2])
-            elif package[1] == 0x0005:
+                    CONTROL.send(self.e_pack)
+            elif r_pack[1] in [0x0002, 0x0004]:
+                CONTROL.send(r_pack[2])
+            elif r_pack[1] in [0x0003, 0xffff]:
+                self.dispense(r_pack[2])
+            elif r_pack[1] == 0x0005:
                 del(CHList['%s:%s'%self.address])
                 ips = ''
                 for ip in CHList.keys():
                     ips = '%s%s\n'%(ips, ip)
                 LOG.info(ips)
                 result = '%s%s'%(result, ips)
-                s_pack = self.packResult(result)
-                s_pack += self.packEnd()
+                s_pack = package.pack2(result)
+                s_pack = '%s%s'%(s_pack, self.e_pack)
                 self.broadcast.send(s_pack)
-            elif package[1] == 0xff00:
+            elif r_pack[1] == 0xff00:
                 self.chkEnd('%s:%s'%self.address)
                 
     def dispense(self, package):
@@ -231,7 +233,7 @@ class testManage(object):
                 info = '%s connecting faild ...'%ip
                 LOG.info(info)
                 result = '%s%s\n'%(result, info)
-                s_pack = self.packResult(result)
+                s_pack = package.pack2(result)
                 self.broadcast.send(s_pack)
                 self.chkEnd(ip)
                     
@@ -240,19 +242,9 @@ class testManage(object):
         if addr in CLTLIST:     #当客户端列表为空时，可以发送控制端收尾指令
             CLTLIST.remove(addr)
             if not CLTLIST:
-                CONTROL.send(self.packEnd())
-        
-    def packResult(self, result):
-        result += '='*30
-        package = struct.pack('<LH', 
-                              result.__len__() + 6, 
-                              0x0002)
-        package += result
-        return package
-    
-    def packEnd(self):
-        return '\x06\x00\x00\x00\x00\xff'
-
+                CONTROL.send(package.pack2('%s connecting faild ...'%addr))
+                CONTROL.send(self.e_pack)
+                
     def getCltList(self, r_pack):
         global CLTLIST
         cltstring_len = int(struct.unpack('<H', r_pack[2][6:8])[0])
@@ -279,13 +271,14 @@ class testManage(object):
         s_pack += m_pack
         return s_pack
     
-    def myIP(self, ip):
+    def _myIP(self, ip):
         ips = ip.split('.')
         tempip = ''
         for i in ips:
             i = '*'*(3-i.__len__()) + i
             tempip += i + '.'
         return tempip[:tempip.__len__()-1]
+
     
 class virtualMessage(object):
     def __init__(self, broadcast, net_to_parse):
@@ -301,7 +294,7 @@ class virtualMessage(object):
         while self.switch:
             try:
                 package = self.net_to_parse.receive()
-                LOG.debug('received package from %s: %s'%(self.user, str(package.__repr__().__len__())))
+                LOG.debug('received package from %s : %s'%(self.user, str(package.__repr__().__len__())))
                 if package == 'exit':
                     if self.uid and self.uid in CHList.keys():
                         self.do_logout()
@@ -419,7 +412,7 @@ class virtualMessage(object):
         return pack
 
 def cltthread():
-    global LOG, RUN
+    global RUN
     LOG.info('runing...')
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('',CLT_PORT))
@@ -442,8 +435,6 @@ def appthread():
         stackless.tasklet(srv.receive)()    
 
 if __name__ == '__main__':
-    log.run_log()
-    LOG = log.error_log()
     stacklesssocket.install()
     import socket
     stackless.tasklet(cltthread)()
