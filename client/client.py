@@ -4,7 +4,7 @@ import sys
 sys.path.append('..\\lib')
 
 import socket,os,re,win32file,time
-from struct import unpack
+from struct import unpack, pack
 from _winreg import *
 
 from config import CONF
@@ -13,13 +13,23 @@ from other import runCMD
 import rar
 import package
 
-#===============================================================================自定义库中所调用的类
-# import logging    
-# import ConfigParser
-#===============================================================================
+from msg_base_pb2 import Msg
+
+#自定义库中所调用的类
+from google.protobuf import descriptor
+from google.protobuf import message
+from google.protobuf import reflection
+from google.protobuf import descriptor_pb2
+
+import logging    
+import ConfigParser
 
 IP = None
 PATH = {}
+SERVER = None
+PORT = None
+USER = None
+PASSWD = None
 
 def _getIP():
     inf = os.popen('ipconfig')
@@ -64,16 +74,19 @@ class ManageClient(object):
         global PATH
         self.socket = sock
         self.e_pack = package.packCtrlEnd()
+        self.msg = Msg()
+        self.GMSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.reset()
+        self.socket.sendall(package.pack6())
         self.receive()
-        
-        
+
     def send(self):
         self.socket.sendall(self.s_pack)
-        LOG.debug('send to Service : %s'%self.s_pack.__repr__().__len__())
+        LOG.debug('send to Service : %s'%self.s_pack.__len__())
     
     def close(self):
         self.switch = False
+        self.GMSocket.close()
         self.socket.close()
     
     def reset(self):
@@ -84,12 +97,13 @@ class ManageClient(object):
         self.localpath = ''
         self.result = ''
         self.switch = True
+        self.login = False
     
     def receive(self):
         pdata = ''
         while self.switch:
             rdata = self.socket.recv(4096)
-            LOG.debug('receive raw_string from Service : %s'%rdata.__repr__().__len__())
+            LOG.debug('receive raw_string from Service : %s'%rdata.__len__())
             if not rdata:
                 LOG.error('disconnect...')
                 self.close()
@@ -98,30 +112,49 @@ class ManageClient(object):
                 
     def parseHead(self, data):
         if len(data) >= 6:
-            head = unpack('<LH', data[:6])
-            if head[1] == 0xffff:
-                LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
-                                                                      head[1]))
-                LOG.debug('received package from Service : %s'%data[:head[0]].__repr__().__len__())
-                self.do()
-                self.send()
-                if self.search:
-                    PATH[self.search]=findPath(self.search)
-                LOG.info('='*30)
-                self.reset()
-                data = ''
-            if head[0] <= len(data):
-                mdata = data[:head[0]]
-                data = data[head[0]:]
-                if head[1] == 0x0006:
-                    self.socket.send(mdata)
-                    LOG.debug('send to Service : %s'%mdata.__repr__())
-                elif head[1] != 0xffff:
-                    self.r_pack.append([head[0], head[1], mdata])
+            head = unpack('<HL', data[:6])
+            if head[1] == 0xABDE:
+                if head[0] <= len(data):
+                    mdata = data[ : head[0] + 2]
+                    data = data[head[0] + 2 : ]
+                    package = unpack("<HLHHL%ss"%(head[0]-12), mdata)
+                    if package[3] == 0x9003:
+                        self.msg.ParseFromString(package[5])
+                        if self.msg.code == 0x230d:
+                            LOG.info('Arena End info : %s'%package[5].__len__())
+                            os.system('taskkill /f /im war3.exe')
+                            os.system('taskkill /f /im startcraft.exe')
+#                            os.system('close_war3.exe')
+                    elif package[3] == 0x9002:
+                        self.login = not self.login
+                    data = self.parseHead(data)
+            else:
+                head = unpack('<LH', data[:6])
+                if head[1] == 0xffff:
                     LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
-                                                             head[1]))
-                    LOG.debug('received package from Service : %s'%mdata.__repr__().__len__())
-                data = self.parseHead(data)
+                                                                          head[1]))
+                    LOG.debug('received package from Service : %s'%data[:head[0]].__len__())
+                    self.do()
+                    self.send()
+                    if self.search:
+                        PATH[self.search]=findPath(self.search)
+                    LOG.info('='*30)
+                    self.reset()
+                    data = ''
+                if head[0] <= len(data):
+                    mdata = data[:head[0]]
+                    data = data[head[0]:]
+                    if head[1] == 0x0006:
+                        self.socket.send(mdata)
+                        if not self.login:
+                            self.chkGMClient()
+                        LOG.debug('send to Service : heart')
+                    elif head[1] != 0xffff:
+                        self.r_pack.append([head[0], head[1], mdata])
+                        LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
+                                                                              head[1]))
+                        LOG.debug('received package from Service : %s'%mdata.__len__())
+                    data = self.parseHead(data)
         return data
     
     def do(self):
@@ -241,11 +274,43 @@ class ManageClient(object):
             LOG.error(str(e))
             self.result = '%s error : %s\n%s\n%s'%(self.fip, str(e), self.localpath, self.result)
 
+    def chkGMClient(self):
+        try:
+            self.GMSocket.settimeout(1)
+            self.GMSocket.connect(('127.0.0.1',13998))
+            LOG.info('localhost grab connecting ...')
+            self.GMlogin()
+        except Exception, e:
+            if str(e) == "(10056, 'Socket is already connected')":
+                LOG.info('localhost connecting ...')
+                self.GMlogin()
+            else:
+                LOG.info('localhost : %s'%str(e))
+
+    def GMlogin(self):
+        global USER, PASSWD
+        """登陆msg服务器"""
+        msg_data = '\x08\x01\x12%s%s\x1a%s%s'%(chr(USER.__len__()), 
+                                               USER, 
+                                               chr(PASSWD.__len__()), 
+                                               PASSWD)
+        len_msg_data = len(msg_data)
+        string = pack("<IHHHI%ss"%len_msg_data,    #第一和第二字段宽度对换
+                      len_msg_data + 14,     #12 = 4+2+2+2+4
+                      0xABDE, # magic code
+                      len_msg_data + 14,
+                      0x9001,
+                      0,
+                      msg_data)
+        self.socket.sendall(string)
+
 if __name__ == '__main__':
     os.system('title test_manage')
     PORT = CONF.getPort()
     SERVER = CONF.getServer()
     PATH = CONF.getCltPath()
+    USER = CONF.getUser()
+    PASSWD = CONF.getPasswd()
     IP = _getIP()
     LOG.info('connecting ...')
     while 1:

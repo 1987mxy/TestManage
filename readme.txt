@@ -22,7 +22,7 @@ srv和clt进行优化
 testmachine1-20
 可以在上传log的文件名上使用相对路径
 ===================================
-testmachine2-15
+testmachine2-16
 原server改为client
 原client改为control
 新架构增加server角色,所有信息通过server中转
@@ -38,3 +38,14 @@ test_manage端连入后收到心跳包后返回,server延时15秒后再次发送心跳包
 	0xff00	control尾包
 新增who特殊事件来询问与server正链接的client列表
 list中设置all可以对链接server的client进行操作
+独立了package.py用来生成数据包
+===================================
+testmachine2-18
+新增包:
+	0xf0f0	关闭server
+control可在step中新增shutdown来正常退出server.py
+who询问中的第二部分表示的是该keyword下的channel数
+===================================
+testmachine2-21
+client端中config.ini文件中需要输入相应账号密码
+可以协助gm-uas脚本做到游戏进程自动开关

@@ -45,4 +45,15 @@ class myConfig(object):
         path.update(dict(self.conf.items(cmd)))
         return path
     
+#===============================================================================
+#    vittual
+#===============================================================================
+    
+    def getUser(self):
+        user = self.conf.get('GM','user')
+        return user
+    
+    def getPasswd(self):
+        password = self.conf.get('GM', 'password')
+        return password
 CONF = myConfig()

@@ -13,10 +13,9 @@ from log import LOG
 import rar
 import package
 
-#===============================================================================自定义库中所调用的类
-# import logging    
-# import ConfigParser
-#===============================================================================
+#自定义库中所调用的类
+import logging    
+import ConfigParser
 
 PATH = {}
 TIME = None
@@ -42,6 +41,7 @@ class NetOperation(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((SERVER, PORT))
         self.socket.settimeout(30)
+        self.socket.sendall(package.pack6())
         
     def close(self):
         self.switch = False
@@ -128,11 +128,12 @@ class MainOperation(object):
             files = dtldata['down'].split('|')
             self.s_pack = '%s%s'%(self.s_pack, package.pack3(PATH['filepath'], files))
         if 'update' in step:
-            package.pack3('%supdate\\'%PATH['filepath'], ['*.*'])
+            self.s_pack = '%s%s'%(self.s_pack, package.pack3('%supdate\\'%PATH['filepath'], ['*.*']))
             OTHER = 'update'
+        if 'shutdown' in step:
+            self.s_pack = '%s%s'%(self.s_pack, package.packSrvEnd())
         self.s_pack = '%s%s'%(self.s_pack, self.e_pack)
-        #try:
-        if 1:
+        try:
             t = NetOperation(self.s_pack)
             t.connect()
             t.send()
@@ -141,13 +142,13 @@ class MainOperation(object):
                 t.close()
             else:
                 t.receive()
-            t.runCommand()
-#        except Exception, e:
-#            if e.message != 'timed out':
-#                LOG.error('%s : %s\n'%(SERVER, str(e)))
-#            else:
-#                LOG.error('%s : time out!'%SERVER)
-#            t.close()
+                t.runCommand()
+        except Exception, e:
+            if e.message != 'timed out':
+                LOG.error('%s : %s\n'%(SERVER, str(e)))
+            else:
+                LOG.error('%s : time out!'%SERVER)
+            t.close()
         if OTHER == 'up':
             os.system('explorer "%s"'%PATH['logpath'])
 
@@ -165,14 +166,14 @@ class MainOperation(object):
             cltlist = split('[|:.]', PATH['list'])
             for i in range(0, cltlist.__len__(), 5):
                 cltlist_string = '%s%s%s%s%s'%(cltlist_string,
-                                                    chr(int(cltlist[i])),
-                                                    chr(int(cltlist[i + 1])),
-                                                    chr(int(cltlist[i + 2])),
-                                                    chr(int(cltlist[i + 3])))
+                                               chr(int(cltlist[i])),
+                                               chr(int(cltlist[i + 1])),
+                                               chr(int(cltlist[i + 2])),
+                                               chr(int(cltlist[i + 3])))
                 if cltlist[i + 4]:            #添加端口号，2字节
                     cltlist_string = '%s%s%s'%(cltlist_string,
-                                                    chr(int(cltlist[i])/256),
-                                                    chr(int(cltlist[i])%256))
+                                               chr(int(cltlist[i])/256),
+                                               chr(int(cltlist[i])%256))
                 else:
                     cltlist_string = '%s\x00\x00'%cltlist_string
             cltlist_string = '%s%s'%(struct.pack('<H', 
