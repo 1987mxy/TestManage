@@ -20,13 +20,13 @@ class myConfig(object):
         for flag in self.conf.options('localpath'):
             tpath = self.conf.get('localpath', flag)
             if not os.path.exists(tpath):
-                self.save(flag, '')
+                self.save('localpath', flag, '')
             else:
                 path[flag] = tpath
         return path
 
-    def save(self,flag,path):
-        self.conf.set('localpath', flag, '%s\\'%path)
+    def save(self, section, item, value):
+        self.conf.set(section, item, value)
         self.conf.write(open('config.ini','w+'))
         
 #===============================================================================

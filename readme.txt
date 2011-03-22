@@ -49,3 +49,15 @@ who询问中的第二部分表示的是该keyword下的channel数
 testmachine2-21
 client端中config.ini文件中需要输入相应账号密码
 可以协助gm-uas脚本做到游戏进程自动开关
+===================================
+testmachine2-27
+settings中VirtualMessage是关闭和打开虚拟message服务器的开关
+===================================
+testmachine3-14
+控制端的config.ini中添加步骤conf用来对客户端段的config.ini的单项行进修改
+===================================
+testmachine4-22
+修复了端口为172的错误
+详细了error日志
+控制端增加了响应统计信息
+gmclient_watcher可以检测到gmclient的信息发现相应错误并截屏

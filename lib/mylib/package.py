@@ -1,11 +1,12 @@
 #coding=gbk
 import os
 from struct import pack, calcsize
+from time import sleep
 
-from settings import PACKAGE_SIZE
-from log import LOG
-from other import runCMD
-import rar
+from mylib.settings import PACKAGE_SIZE
+from mylib.other import runCMD,chkPath
+from mylib.log import LOG
+import mylib.rar
 
 
 def pack1(cltlist_string, cmdpack):  #指令包
@@ -25,16 +26,16 @@ def pack2(result):  #反馈包
     
 def pack3(path, names):  #下载更新文件包
         packages = ''
+        chkPath(r'.\temp')
         for n in names:
-            if os.path.exists('%s%s'%(path, n)):
-                os.popen('copy /y "%s%s" ".\\temp\\%s"'%(path, n, n))
+            if n == '*.*' or os.path.exists('%s%s'%(path, n)):
+                runCMD('copy /y "%s%s" ".\\temp\\%s"'%(path, n, n))
             else:
                 raise Exception('%s%s not exists!'%(path, n))
-        LOG.debug(rar.compression('down', '.\\temp\\', names))
+        LOG.debug(mylib.rar.compression('down', '.\\temp\\', names))
         LOG.info('压缩文件%s'%names)
         data = open(r'.\temp\down.rar','rb').read()
         filepack_len = data.__len__()/PACKAGE_SIZE
-        LOG.info(filepack_len)
         filepack_handler = pack('<LH', 
                                 6 + PACKAGE_SIZE, 
                                 0x0003)
@@ -53,6 +54,7 @@ def pack4(ip, spath, names):  #上传LOG文件包
         result = ''
         packages = ''
         ns = []
+        chkPath(r'.\temp')
         for n in names:
             if '\\' in n:
                 realn = n.split('\\')[1]
@@ -63,9 +65,8 @@ def pack4(ip, spath, names):  #上传LOG文件包
             r = r[:r.__len__()-1]
             result = '%s%s%s_%s\n'%(result, r, ip, realn)
         os.system('msg %username% "log已收集,请继续测试!"')
-        LOG.debug(rar.compression('up', '.\\temp\\', ns))
+        LOG.debug(mylib.rar.compression('up', '.\\temp\\', ns))
         LOG.info('成功压缩文件')
-        result = '%s成功压缩文件\n'%result
         data = open(r'.\temp\up.rar','rb').read()
         dname = '%s_up'%ip
         filepack_handler = pack('<LHH%ss'%dname.__len__(), 

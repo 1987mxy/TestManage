@@ -3,19 +3,16 @@
 import sys
 sys.path.append('..\\lib')
 
-import os, socket
-from struct import unpack
+import os, socket, traceback
+from struct import unpack, pack
 from re import sub, split
 from datetime import datetime
 
-from config import CONF
-from log import LOG
-import rar
-import package
-
-#自定义库中所调用的类
-import logging    
-import ConfigParser
+from mylib.config import CONF
+from mylib.log import LOG
+from mylib.other import chkPath
+import mylib.rar
+import mylib.package
 
 PATH = {}
 TIME = None
@@ -35,13 +32,13 @@ class NetOperation(object):
         self.other = None
         self.switch = True
         self.socket = None
-        self.file = []
+        self.file = {}
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((SERVER, PORT))
         self.socket.settimeout(30)
-        self.socket.sendall(package.pack6())
+        self.socket.sendall(mylib.package.pack6())   #第一个心跳包
         
     def close(self):
         self.switch = False
@@ -49,7 +46,7 @@ class NetOperation(object):
         
     def send(self):
         self.socket.sendall(self.s_pack)
-        LOG.debug('send to Serivce : %s'%self.s_pack.__repr__())
+        LOG.debug('send to Serivce : %s'%self.s_pack.__len__())
         
     def receive(self):
         while self.switch:
@@ -72,43 +69,48 @@ class NetOperation(object):
                 data = data[head[0] : ]
                 if head[1] == 0x0006:
                     self.socket.sendall(mdata)
-                    LOG.debug('send to Serivce : %s'%mdata.__repr__())
+                    LOG.debug('received heart!')
                 elif head[1] != 0xff00:
                     self.r_pack.append([head[0], head[1], mdata])
-                    LOG.debug('received handler : [%d, %2x]'%(head[0], 
-                                                             head[1]))
-                    LOG.debug('received package : %s'%mdata.__repr__())
+                    LOG.debug('received head from Service : [%d, %2x]'%(head[0], 
+                                                                        head[1]))
+                    LOG.debug('received package from Service : %s'%mdata.__repr__())
                 data = self.parseHead(data)
         return data
     
     def runCommand(self):
+        global PATH
+        filesize = 0
+        total = 0
         for len, type, data in self.r_pack:
             if type == 0x0002:  #对指令的结果反馈
                 LOG.info(data[6:])
                 LOG.info('='*30)
+                total += 1
             elif type == 0x0004:
-                global PATH
-                if self.file:   #是否第一个0x0004的包
-                    self.file[1] = '%s%s'%(self.file[1], data[filename_len + 8 : ])   #补充文件
+                filename_len = unpack('<H',data[6 : 8])[0]   #log文件名长度
+                filename = data[8 : filename_len + 8]
+                if filename in self.file.keys():
+                    self.file[filename].write(data[filename_len + 8 : ])   #补充文件
                 else:
-                    if not os.path.exists(PATH['logpath']):  #log目录是否存在
-                        os.popen('mkdir "%s"'%PATH['logpath'])
-                    filename_len = unpack('<H',data[6 : 8])[0]   #log文件名长度
-                    self.file.append(data[8 : filename_len + 8])
-                    self.file.append(data[filename_len + 8 : ])
-        if self.file:
-            file = open(r'.\temp\%s.rar'%self.file[0],'wb')
-            file.write(self.file[1])
-            file.close()
-            LOG.debug(rar.decompression(self.file[0], PATH['logpath'])) #解压log,此时socket已经断开不需要settimeout
-            LOG.info('解压%s到%s\n'%(self.file[0], PATH['logpath']))
+                    chkPath(r'.\temp')
+                    self.file[filename] = open(r'.\temp\%s.rar'%filename,'wb')
+                    self.file[filename].write(data[filename_len + 8 : ])
+                filesize += data[filename_len + 8 : ].__len__()
+        LOG.info('receive filesize is %s'%filesize)
+        LOG.info('response client total %s'%total)
+        for filename in self.file.keys():
+            self.file[filename].close()
+            chkPath(PATH['logpath'])
+            LOG.debug(mylib.rar.decompression(filename, PATH['logpath'])) #解压log,此时socket已经断开不需要settimeout
+            LOG.info('解压%s到%s\n'%(filename, PATH['logpath']))
             
 class MainOperation(object):
     def __init__(self):
         global SERVER,PATH
         self.s_pack = ''
-        self.e_pack = package.packCltEnd()
-        self.w_pack = package.pack5()
+        self.e_pack = mylib.package.packCltEnd()
+        self.w_pack = mylib.package.pack5()
 
     def operation(self, cmdline):
         global OTHER
@@ -117,21 +119,22 @@ class MainOperation(object):
         step = dtldata['step'].split('|')
         if 'who' in step:
             self.s_pack = '%s%s'%(self.s_pack, self.w_pack)
+        elif 'shutdown' in step:
+            self.s_pack = '%s%s'%(self.s_pack, mylib.package.packSrvEnd())
         else:
             cmdpack = self.makeCMDString(dtldata)
             cltlist_string = self.makeCLTString()
-            self.s_pack = '%s%s'%(self.s_pack, package.pack1(cltlist_string, cmdpack))    #先发0x0001包是让server知道该转发给那些玩家
+            self.s_pack = '%s%s'%(self.s_pack, mylib.package.pack1(cltlist_string, cmdpack))    #先发0x0001包是让server知道该转发给那些玩家
         if 'up' in step:
             dtldata['logpath'] = '%s%s_%s\\'%(dtldata['logpath'], TIME, cmds[1])
             OTHER = 'up'
         if 'down' in step:   #step中没有down就不会产生文件包
             files = dtldata['down'].split('|')
-            self.s_pack = '%s%s'%(self.s_pack, package.pack3(PATH['filepath'], files))
+            self.s_pack = '%s%s'%(self.s_pack, mylib.package.pack3(PATH['filepath'], files))
         if 'update' in step:
-            self.s_pack = '%s%s'%(self.s_pack, package.pack3('%supdate\\'%PATH['filepath'], ['*.*']))
+            self.s_pack = '%s%s'%(self.s_pack, mylib.package.pack3('%supdate\\'%PATH['filepath'], ['*.*']))
             OTHER = 'update'
-        if 'shutdown' in step:
-            self.s_pack = '%s%s'%(self.s_pack, package.packSrvEnd())
+        
         self.s_pack = '%s%s'%(self.s_pack, self.e_pack)
         try:
             t = NetOperation(self.s_pack)
@@ -145,7 +148,7 @@ class MainOperation(object):
                 t.runCommand()
         except Exception, e:
             if e.message != 'timed out':
-                LOG.error('%s : %s\n'%(SERVER, str(e)))
+                LOG.error('%s : %s\n'%(SERVER, traceback.format_exc()))
             else:
                 LOG.error('%s : time out!'%SERVER)
             t.close()
@@ -172,12 +175,12 @@ class MainOperation(object):
                                                chr(int(cltlist[i + 3])))
                 if cltlist[i + 4]:            #添加端口号，2字节
                     cltlist_string = '%s%s%s'%(cltlist_string,
-                                               chr(int(cltlist[i])/256),
-                                               chr(int(cltlist[i])%256))
+                                               chr(int(cltlist[i + 4]) / 256),
+                                               chr(int(cltlist[i + 4]) % 256))
                 else:
                     cltlist_string = '%s\x00\x00'%cltlist_string
-            cltlist_string = '%s%s'%(struct.pack('<H', 
-                                                 cltlist_string.__len__()),
+            cltlist_string = '%s%s'%(pack('<H', 
+                                          cltlist_string.__len__()),
                                      cltlist_string)
         return cltlist_string
 

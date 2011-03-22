@@ -3,26 +3,16 @@
 import sys
 sys.path.append('..\\lib')
 
-import socket,os,re,win32file,time
+import socket,os,re,win32file,time, traceback
 from struct import unpack, pack
 from _winreg import *
 
-from config import CONF
-from log import LOG
-from other import runCMD
-import rar
-import package
-
-from msg_base_pb2 import Msg
-
-#自定义库中所调用的类
-from google.protobuf import descriptor
-from google.protobuf import message
-from google.protobuf import reflection
-from google.protobuf import descriptor_pb2
-
-import logging    
-import ConfigParser
+from mylib.config import CONF
+from mylib.log import LOG
+from mylib.other import runCMD, chkPath
+from mylib.msg_base_pb2 import Msg
+import mylib.rar
+import mylib.package
 
 IP = None
 PATH = {}
@@ -50,14 +40,14 @@ def _findPath(flag):
             for localpath,fields,files in os.walk(drive):
                 if flag in files:
                     if open(r'%s\%s'%(localpath, flag), 'r').read() == '95279527':
-                        CONF.save(flag, localpath)
+                        CONF.save('localpath', flag, '%s\\'%localpath)
                         PATH[flag] = localpath
-                        LOG.info('localpath: %s\\'%localpath)
+                        LOG.info('localpath : %s\\'%localpath)
                         return '%s\\'%localpath
     LOG.info('localpath: path is none!')
     return ''
 
-def _manageChar(path, char):   #根据通配符得到相应文件列表,uplog时+ip用
+def _manageChar(path, char):   #根据通配符得到相应文件列表,如果直接用通配符无法在文件名中+上IP
     filename = []
     if '\\' in char:
         spath = re.split(r'\\', char)[0]
@@ -73,11 +63,12 @@ class ManageClient(object):
     def __init__(self, sock):
         global PATH
         self.socket = sock
-        self.e_pack = package.packCtrlEnd()
+        
+        self.login = False
+        self.e_pack = mylib.package.packCtrlEnd()
         self.msg = Msg()
-        self.GMSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.reset()
-        self.socket.sendall(package.pack6())
+        self.socket.sendall(mylib.package.pack6())
         self.receive()
 
     def send(self):
@@ -86,7 +77,6 @@ class ManageClient(object):
     
     def close(self):
         self.switch = False
-        self.GMSocket.close()
         self.socket.close()
     
     def reset(self):
@@ -97,7 +87,7 @@ class ManageClient(object):
         self.localpath = ''
         self.result = ''
         self.switch = True
-        self.login = False
+        
     
     def receive(self):
         pdata = ''
@@ -120,24 +110,28 @@ class ManageClient(object):
                     package = unpack("<HLHHL%ss"%(head[0]-12), mdata)
                     if package[3] == 0x9003:
                         self.msg.ParseFromString(package[5])
-                        if self.msg.code == 0x230d:
+                        if self.msg.code == 0x230d and (not self.msg.arenaEnded.error):
                             LOG.info('Arena End info : %s'%package[5].__len__())
                             os.system('taskkill /f /im war3.exe')
                             os.system('taskkill /f /im startcraft.exe')
 #                            os.system('close_war3.exe')
                     elif package[3] == 0x9002:
                         self.login = not self.login
+                        if self.login:
+                            os.system('start gmclient_watcher.exe')
+                        else:
+                            os.system('taskkill /f /im gmclient_watcher.exe')
                     data = self.parseHead(data)
             else:
                 head = unpack('<LH', data[:6])
                 if head[1] == 0xffff:
-                    LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
-                                                                          head[1]))
+                    LOG.info('received head from Service : [%d, %2x]'%(head[0], 
+                                                                       head[1]))
                     LOG.debug('received package from Service : %s'%data[:head[0]].__len__())
                     self.do()
                     self.send()
                     if self.search:
-                        PATH[self.search]=findPath(self.search)
+                        PATH[self.search]=_findPath(self.search)
                     LOG.info('='*30)
                     self.reset()
                     data = ''
@@ -148,7 +142,7 @@ class ManageClient(object):
                         self.socket.send(mdata)
                         if not self.login:
                             self.chkGMClient()
-                        LOG.debug('send to Service : heart')
+                        LOG.debug('received heart!')
                     elif head[1] != 0xffff:
                         self.r_pack.append([head[0], head[1], mdata])
                         LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
@@ -165,16 +159,16 @@ class ManageClient(object):
                 if self.file:
                     self.file.write(data[6:])
                 else:
+                    chkPath(r'.\temp')
                     self.file = open(r'.\temp\down.rar','wb')
                     self.file.write(data[6:])
                 filesize += data.__len__()
         if self.file:
-            LOG.info('receive filesize is %s'%filesize)
             self.file.close()
+            LOG.info('receive filesize is %s'%filesize)
         for len, type, data in self.r_pack:
             if type == 0x0001:
-                data = self.readString(data[6:])
-                self.localpath = PATH[data['localpath']]
+                data = self.readString(data[6:]) 
                 if data['ip'] == IP:
                     self.fip = IP
                 else:
@@ -183,6 +177,7 @@ class ManageClient(object):
                     self.fip = '%s_%s'%(data['ip'], t)
                 if 'open' in data.keys() or 'down' in data.keys() or 'up' in data.keys() or 'delete' in data.keys(): 
                     if data['localpath'] in PATH.keys() and os.path.exists(PATH[data['localpath']] + data['localpath']):
+                        self.localpath = PATH[data['localpath']]
                         self.operation(data)
                     else:
                         self.result = '%s: path is none!\n'%self.fip
@@ -192,7 +187,7 @@ class ManageClient(object):
                     if not data['localpath'] in PATH.keys():
                         PATH[data['localpath']]=''
                     self.operation(data)
-        self.s_pack = '%s%s'%(self.s_pack, package.pack2(self.result))
+        self.s_pack = '%s%s'%(self.s_pack, mylib.package.pack2(self.result))
         self.s_pack = '%s%s'%(self.s_pack, self.e_pack)
 
     #================解析数据报=================
@@ -216,7 +211,7 @@ class ManageClient(object):
                             fs += _manageChar(self.localpath, f)
                     if fs:
                         self.socket.settimeout(0)
-                        r = package.pack4(self.fip, self.localpath, fs)
+                        r = mylib.package.pack4(self.fip, self.localpath, fs)
                         self.socket.settimeout(60)
                         self.result = '%s%s'%(self.result, r[0])
                         self.s_pack = '%s%s'%(self.s_pack, r[1])
@@ -233,9 +228,7 @@ class ManageClient(object):
                     #================开进程=================
                     #================下载文件=================
                     elif step == 'down':
-                        if not os.path.exists('%shistory'%self.localpath):
-                            runCMD('mkdir "%shistory"'%self.localpath)
-                            time.sleep(3)
+                        chkPath('%shistory'%self.localpath)
                         tcmd = '%shistory\\%s'%(self.localpath, flag)
                         runCMD('del /q /f "%s(5)"'%tcmd)
                         runCMD('ren "%s(4)" "%s(5)"'%(tcmd,tcmd))
@@ -246,7 +239,7 @@ class ManageClient(object):
                         LOG.info('成功下载文件%s'%flag)
                         self.result = '%s成功下载文件%s\n'%(self.result, flag)
                         self.socket.settimeout(0)
-                        LOG.debug(rar.decompression('down', self.localpath)) #解压文件
+                        LOG.debug(mylib.rar.decompression('down', self.localpath)) #解压文件
                         self.socket.settimeout(60)
                         LOG.info('成功解压到%s'%self.localpath)
                         self.result = '%s成功解压到%s\n'%(self.result, self.localpath)
@@ -255,10 +248,35 @@ class ManageClient(object):
                     elif step == 'cmd':
                         runCMD('start %s'%flag)
                     #================CMD命令=================
+                    #================修改config文件=================
+                    elif step == 'conf':
+                        para = re.split('-', data[step])
+                        CONF.save(para[0], para[1], para[2])
+                        fileRestart = open('restart.bat','w')
+                        cmds = '''
+                               taskkill /f /im client.exe
+                               start.vbs
+                               del /q /f restart.bat
+                               '''
+                        fileRestart.write(cmds)
+                        fileRestart.close()
+                        os.system('restart.bat')
+                    #================修改config文件=================
                     #================自我更新=================
                     elif step == 'update':
+                        chkPath(r'.\update')
                         os.popen(r'del /q /f .\update\*.*')
-                        LOG.debug(rar.decompression('down', '.\\update\\')) #解压update文件
+                        LOG.debug(mylib.rar.decompression('down', '.\\update\\')) #解压update文件
+                        fileUpdate = open('update.bat','w')
+                        cmds = '''
+                               taskkill /f /im client.exe
+                               ping -n 2 127.0.0.1
+                               copy /y ".\update\*.*" ".\"
+                               start.vbs
+                               del /q /f update.bat
+                               '''
+                        fileUpdate.write(cmds)
+                        fileUpdate.close()
                         os.system('update.bat')
                     #================自我更新=================
                     #================删除文件=================
@@ -270,14 +288,17 @@ class ManageClient(object):
                             self.result = '%s成功删除%s\n'%(self.result, flag)
                     #================删除文件=================
             self.result = '%s : done\n%s\n%s'%(self.fip, self.localpath, self.result)
-        except Exception, e:
-            LOG.error(str(e))
-            self.result = '%s error : %s\n%s\n%s'%(self.fip, str(e), self.localpath, self.result)
+        except :
+            self.result = '%s error : %s\n%s\n%s'%(self.fip, traceback.format_exc(), self.localpath, self.result)
+            LOG.error(self.result)
+            
 
     def chkGMClient(self):
         try:
-            self.GMSocket.settimeout(1)
-            self.GMSocket.connect(('127.0.0.1',13998))
+            GMSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            GMSocket.settimeout(1)
+            GMSocket.connect(('127.0.0.1',13998))
+            GMSocket.close()
             LOG.info('localhost grab connecting ...')
             self.GMlogin()
         except Exception, e:
@@ -285,7 +306,7 @@ class ManageClient(object):
                 LOG.info('localhost connecting ...')
                 self.GMlogin()
             else:
-                LOG.info('localhost : %s'%str(e))
+                LOG.debug('localhost : %s'%traceback.format_exc())
 
     def GMlogin(self):
         global USER, PASSWD
@@ -295,7 +316,7 @@ class ManageClient(object):
                                                chr(PASSWD.__len__()), 
                                                PASSWD)
         len_msg_data = len(msg_data)
-        string = pack("<IHHHI%ss"%len_msg_data,    #第一和第二字段宽度对换
+        string = pack("<LHHHL%ss"%len_msg_data,    #第一和第二字段宽度对换
                       len_msg_data + 14,     #12 = 4+2+2+2+4
                       0xABDE, # magic code
                       len_msg_data + 14,
@@ -312,14 +333,13 @@ if __name__ == '__main__':
     USER = CONF.getUser()
     PASSWD = CONF.getPasswd()
     IP = _getIP()
-    LOG.info('connecting ...')
     while 1:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((SERVER, PORT))
+            LOG.info('connecting ...')
             sock.settimeout(60)
             ManageClient(sock)
-        except Exception, e:
-            LOG.error(str(e))
+        except:
+            LOG.error(traceback.format_exc())
             time.sleep(10)
-            LOG.info('reconnecting ...')

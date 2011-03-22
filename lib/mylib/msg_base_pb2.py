@@ -10,7 +10,7 @@ from google.protobuf import descriptor_pb2
 DESCRIPTOR = descriptor.FileDescriptor(
   name='msg_base.proto',
   package='',
-  serialized_pb='\n\x0emsg_base.proto\"X\n\x03Msg\x12\n\n\x02id\x18\x01 \x01(\r\x12\x0c\n\x04\x63ode\x18\x02 \x02(\r\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x0b\n\x03ttl\x18\x04 \x01(\r\x12\x0e\n\x06subMsg\x18\x05 \x01(\t\x12\x0c\n\x04uuid\x18\t \x01(\tB\r\n\tproto.msgH\x02')
+  serialized_pb='\n\x0emsg_base.proto\x1a\x0fmsg_arena.proto\"^\n\x03Msg\x12\n\n\x02id\x18\x01 \x01(\r\x12\x0c\n\x04\x63ode\x18\x02 \x02(\r\x12\x0b\n\x03ttl\x18\x04 \x01(\r\x12\x0e\n\x06subMsg\x18\x05 \x01(\t\x12 \n\narenaEnded\x18\xb5\x02 \x01(\x0b\x32\x0b.ArenaEnded\"4\n\x07MsgList\x12\x16\n\x08messages\x18\x01 \x03(\x0b\x32\x04.Msg\x12\x11\n\tlast_read\x18\x02 \x01(\rB\x0b\n\tproto.msg')
 
 
 
@@ -37,30 +37,23 @@ _MSG = descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       options=None),
     descriptor.FieldDescriptor(
-      name='text', full_name='Msg.text', index=2,
-      number=3, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=unicode("", "utf-8"),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    descriptor.FieldDescriptor(
-      name='ttl', full_name='Msg.ttl', index=3,
+      name='ttl', full_name='Msg.ttl', index=2,
       number=4, type=13, cpp_type=3, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     descriptor.FieldDescriptor(
-      name='subMsg', full_name='Msg.subMsg', index=4,
+      name='subMsg', full_name='Msg.subMsg', index=3,
       number=5, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=unicode("", "utf-8"),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     descriptor.FieldDescriptor(
-      name='uuid', full_name='Msg.uuid', index=5,
-      number=9, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=unicode("", "utf-8"),
+      name='arenaEnded', full_name='Msg.arenaEnded', index=4,
+      number=309, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
@@ -73,16 +66,60 @@ _MSG = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=18,
-  serialized_end=106,
+  serialized_start=35,
+  serialized_end=129,
 )
 
 
+_MSGLIST = descriptor.Descriptor(
+  name='MsgList',
+  full_name='MsgList',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    descriptor.FieldDescriptor(
+      name='messages', full_name='MsgList.messages', index=0,
+      number=1, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    descriptor.FieldDescriptor(
+      name='last_read', full_name='MsgList.last_read', index=1,
+      number=2, type=13, cpp_type=3, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  extension_ranges=[],
+  serialized_start=131,
+  serialized_end=183,
+)
+
+import msg_arena_pb2
+
+_MSG.fields_by_name['arenaEnded'].message_type = msg_arena_pb2._ARENAENDED
+_MSGLIST.fields_by_name['messages'].message_type = _MSG
 
 class Msg(message.Message):
   __metaclass__ = reflection.GeneratedProtocolMessageType
   DESCRIPTOR = _MSG
   
   # @@protoc_insertion_point(class_scope:Msg)
+
+class MsgList(message.Message):
+  __metaclass__ = reflection.GeneratedProtocolMessageType
+  DESCRIPTOR = _MSGLIST
+  
+  # @@protoc_insertion_point(class_scope:MsgList)
 
 # @@protoc_insertion_point(module_scope)

@@ -36,3 +36,26 @@ start game appear heart time out so close heart of gamemate link for the moment
 simulate keyboard "Alt+F4,X" quit game process which wasn't tranquilization so force kill game process while recevie submit result package
 can start game of loop
 debug virtual message service done and testing now
+=========================================
+2-22
+fixed bug of upload log file
+clean up log file output
+clean up *.py file in ..\lib
+addtion sid authentication in double login action
+=========================================
+2-27
+add VirtualMessage parameter is switch of VirtualMessage in settings.py
+add TEST_PORT(8782) parameter which setting port of TestManage Service
+peel off APP Service connecting affair from VirtualMessage Class
+rename VirtualMessage to VirtualMessage_to_Client and VirtualMessage_to_Service
+=========================================
+3-14
+update & restart bat file integration to client.py and suicide at run end
+add step "conf" that modify config.ini file of client
+=========================================
+3-22
+fixed error that control list port is '172'
+error log print stack information(traceback.format_exc)
+reconstruction server.py net class be inherit to testManage, VirtualMessage_to_Service and VirtualMessage_to_Client class
+appear error "AttributeError: a instance has no attribute 'address'" and detail log wait bug appear
+creat gmclient_watcher chack gmclient error information and get screen
