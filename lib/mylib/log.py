@@ -1,5 +1,6 @@
 # -*- encoding: utf-8 -*-
-import logging,sys
+import logging
+from sys import stdout
 from os import path,mkdir
 from win32gui import GetWindowDC
 from win32ui import CreateDCFromHandle, CreateBitmap
@@ -42,7 +43,7 @@ def run_log():
     logfile.setFormatter(fmt)
     rlog.addHandler(logfile)
     if mylib.settings.PRINT_RUNLOG and mylib.settings.PRINT_LOG:
-        display = logging.StreamHandler(sys.stdout)
+        display = logging.StreamHandler(stdout)
         display.setLevel(logging.INFO)
         rlog.addHandler(display)  #print to screen
 #    errorlog
@@ -64,7 +65,7 @@ def run_log():
 #    logfile.setFormatter(fmt)
 #    plog.addHandler(logfile)
 #    if settings.PRINT_PERFORMANCELOG and settings.PRINT_LOG:
-#        display = logging.StreamHandler(sys.stdout)
+#        display = logging.StreamHandler(stdout)
 #        display.setLevel(logging.INFO)
 #        plog.addHandler(display)  #print to scree
 #    return plog

@@ -1,12 +1,12 @@
 #coding=gbk
-import os
-import ConfigParser
+from os import path as ospath
+from ConfigParser import ConfigParser
 
 CONF = None
 
 class myConfig(object):
     def __init__(self):
-        self.conf = ConfigParser.ConfigParser()
+        self.conf = ConfigParser()
         self.conf.read('config.ini')
     
     def getPort(self):
@@ -19,7 +19,7 @@ class myConfig(object):
         path = {}
         for flag in self.conf.options('localpath'):
             tpath = self.conf.get('localpath', flag)
-            if not os.path.exists(tpath):
+            if not ospath.exists(tpath):
                 self.save('localpath', flag, '')
             else:
                 path[flag] = tpath
@@ -50,10 +50,14 @@ class myConfig(object):
 #===============================================================================
     
     def getUser(self):
-        user = self.conf.get('GM','user')
+        user = self.conf.get('Script','user')
         return user
     
     def getPasswd(self):
-        password = self.conf.get('GM', 'password')
+        password = self.conf.get('Script', 'password')
         return password
+    
+    def getGMPort(self):
+        return int(self.conf.get('Script', 'gmport'))
+    
 CONF = myConfig()

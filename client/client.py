@@ -3,7 +3,10 @@
 import sys
 sys.path.append('..\\lib')
 
-import socket,os,re,win32file,time, traceback
+import socket, os, re
+from traceback import format_exc
+from win32file import GetLogicalDrives
+from time import sleep
 from struct import unpack, pack
 from _winreg import *
 
@@ -18,6 +21,7 @@ IP = None
 PATH = {}
 SERVER = None
 PORT = None
+GMPORT = None
 USER = None
 PASSWD = None
 
@@ -32,7 +36,7 @@ def _getIP():
 def _findPath(flag):
     global PATH,CONF
     LOG.info('sreach file ...')
-    r = win32file.GetLogicalDrives()
+    r = GetLogicalDrives()
     for d in range(2,27):
         if(r>>d&1):
             import string
@@ -88,6 +92,9 @@ class ManageClient(object):
         self.result = ''
         self.switch = True
         
+    def reconnect(self):
+        
+        pass
     
     def receive(self):
         pdata = ''
@@ -101,6 +108,7 @@ class ManageClient(object):
                 pdata = self.parseHead(pdata + rdata)
                 
     def parseHead(self, data):
+        global GMPORT
         if len(data) >= 6:
             head = unpack('<HL', data[:6])
             if head[1] == 0xABDE:
@@ -118,7 +126,7 @@ class ManageClient(object):
                     elif package[3] == 0x9002:
                         self.login = not self.login
                         if self.login:
-                            os.system('start gmclient_watcher.exe')
+                            os.system('gmclient_watcher.vbs %s'%GMPORT)
                         else:
                             os.system('taskkill /f /im gmclient_watcher.exe')
                     data = self.parseHead(data)
@@ -246,18 +254,19 @@ class ManageClient(object):
                     #================下载文件=================
                     #================CMD命令=================
                     elif step == 'cmd':
-                        runCMD('start %s'%flag)
+                        self.result = '%s%s\n'%(self.result, runCMD('%s'%flag))
                     #================CMD命令=================
                     #================修改config文件=================
                     elif step == 'conf':
                         para = re.split('-', data[step])
                         CONF.save(para[0], para[1], para[2])
                         fileRestart = open('restart.bat','w')
-                        cmds = '''
-                               taskkill /f /im client.exe
-                               start.vbs
-                               del /q /f restart.bat
-                               '''
+                        cmds = r'''
+                                taskkill /f /im client.exe
+                                taskkill /f /im gmclient_watcher.exe
+                                start.vbs
+                                del /q /f restart.bat
+                                '''
                         fileRestart.write(cmds)
                         fileRestart.close()
                         os.system('restart.bat')
@@ -268,13 +277,14 @@ class ManageClient(object):
                         os.popen(r'del /q /f .\update\*.*')
                         LOG.debug(mylib.rar.decompression('down', '.\\update\\')) #解压update文件
                         fileUpdate = open('update.bat','w')
-                        cmds = '''
-                               taskkill /f /im client.exe
-                               ping -n 2 127.0.0.1
-                               copy /y ".\update\*.*" ".\"
-                               start.vbs
-                               del /q /f update.bat
-                               '''
+                        cmds = r'''
+                                taskkill /f /im client.exe
+                                taskkill /f /im gmclient_watcher.exe
+                                ping -n 2 127.0.0.1
+                                copy /y ".\update\*.*" ".\"
+                                start.vbs
+                                del /q /f update.bat
+                                '''
                         fileUpdate.write(cmds)
                         fileUpdate.close()
                         os.system('update.bat')
@@ -289,24 +299,17 @@ class ManageClient(object):
                     #================删除文件=================
             self.result = '%s : done\n%s\n%s'%(self.fip, self.localpath, self.result)
         except :
-            self.result = '%s error : %s\n%s\n%s'%(self.fip, traceback.format_exc(), self.localpath, self.result)
+            self.result = '%s error : %s\n%s\n%s'%(self.fip, format_exc(), self.localpath, self.result)
             LOG.error(self.result)
             
 
     def chkGMClient(self):
-        try:
-            GMSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            GMSocket.settimeout(1)
-            GMSocket.connect(('127.0.0.1',13998))
-            GMSocket.close()
-            LOG.info('localhost grab connecting ...')
+        global GMPORT
+        netcmd = os.popen('netstat -na')
+        port_info = netcmd.read()
+        gmport_info = re.findall('\s0\.0\.0\.0:%s\s'%GMPORT, port_info)
+        if gmport_info:
             self.GMlogin()
-        except Exception, e:
-            if str(e) == "(10056, 'Socket is already connected')":
-                LOG.info('localhost connecting ...')
-                self.GMlogin()
-            else:
-                LOG.debug('localhost : %s'%traceback.format_exc())
 
     def GMlogin(self):
         global USER, PASSWD
@@ -328,6 +331,7 @@ class ManageClient(object):
 if __name__ == '__main__':
     os.system('title test_manage')
     PORT = CONF.getPort()
+    GMPORT = CONF.getGMPort()
     SERVER = CONF.getServer()
     PATH = CONF.getCltPath()
     USER = CONF.getUser()
@@ -341,5 +345,5 @@ if __name__ == '__main__':
             sock.settimeout(60)
             ManageClient(sock)
         except:
-            LOG.error(traceback.format_exc())
-            time.sleep(10)
+            LOG.error(format_exc())
+        sleep(30)

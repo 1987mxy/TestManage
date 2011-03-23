@@ -5,11 +5,13 @@ sys.path.append('..\\lib')
 
 import socket
 import traceback
+from time import sleep
 
 from mylib import log
 
 class GMClient(object):
     def __init__(self, sock):
+        self.switch = True
         self.socket = sock
         self.gamestatus = 0
     
@@ -17,7 +19,7 @@ class GMClient(object):
         pdata = ''
         while self.switch:
             rdata = self.socket.recv(4096)
-            LOG.debug('receive raw_string from GMClient : %s'%rdata.__len__())
+            log.LOG.debug('receive raw_string from GMClient : %s'%rdata.__len__())
             if not rdata:
                 log.LOG.error('GMClient disconnect...')
                 self.close()
@@ -47,12 +49,13 @@ if __name__ == '__main__':
     GMSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     while 1:
         try:
-            GMSocket.connect(('127.0.0.1',13998))
+            GMSocket.connect(('127.0.0.1', int(sys.argv[1])))
             GMSocket.settimeout(1)
             GM = GMClient(GMSocket)
             GM.receive()
         except Exception, e:
             if str(e) == "(10056, 'Socket is already connected')":
-                LOG.info('GMClient connecting ...')
+                log.LOG.info('GMClient connecting ...')
             else:
-                LOG.debug('GMClient : %s'%traceback.format_exc())
+                log.LOG.error('GMClient : %s'%traceback.format_exc())
+        sleep(30)

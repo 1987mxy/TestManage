@@ -1,2 +1,2 @@
-D:\Python25\python control.py
+python control.py
 pause

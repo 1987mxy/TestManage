@@ -1,8 +1,13 @@
 #coding=gbk
 
 from sys import path
-import urllib, stackless, re, struct, traceback
 path.append('..\\lib')
+
+import stackless
+from urllib import urlopen
+from traceback import format_exc
+from struct import unpack, pack
+
 
 from mylib.log import LOG
 import mylib.package
@@ -63,13 +68,13 @@ class net(object):
         except :
             LOG.error('type %s : %s'%(self.__class__, dir(self)))
             LOG.error('%s net error : %s'%(self.address,
-                                           traceback.format_exc()))
+                                           format_exc()))
             self.exit()
-                
+
     def parseHead(self, data):
         authentic = False
         if len(data) >= 6:
-            head = struct.unpack(self.headformat, data[:6])
+            head = unpack(self.headformat, data[:6])
             if not self.MagicCode:
                 if (head[1] <= 6 and head[1] > 0) or (head[1] in [0xABDE,0xffff,0xff00,0xf0f0]):
                     authentic = True
@@ -93,9 +98,6 @@ class net(object):
                 if rdata == 'exit':
                     LOG.info('%s be exited!'%self.address)
                     self.exit()
-#                    self.broadcast.close()
-#                    self.sock.close()
-                    break
                 else:
                     self.sock.sendall(rdata)
                     LOG.debug('send to %s : %s'%(self.address, 
@@ -106,10 +108,10 @@ class net(object):
                     LOG.error('%s Socket has be closed! Send package failed : %s'%(self.address, 
                                                                                    rdata.__len__()))
                 else:
-                    LOG.error('%s : %s'%(traceback.format_exc(),
+                    LOG.error('%s : %s'%(format_exc(),
                                          rdata.__repr__()))
                 self.exit()
-    
+
     def chkHeart(self, time):
         while (not self.death) and self.switch:
             self.death = True
@@ -125,23 +127,9 @@ class net(object):
             SLEEP.delay_caller(time)
             if self.switch:
                 self.broadcast.send(package)
-       
+                
     def exit(self):
-        if self.switch:
-            self.switch = False
-#            if self.task_do:
-#                self.task_do.kill()
-#            if self.task_chkHeart:
-#                self.task_chkHeart.kill()
-#            if self.task_reHeart:
-#                self.task_reHeart.kill()
-#            if self.task_broadcast:
-#                self.task_broadcast.kill()
-#            self.heart.close()
-#            self.broadcast.close()
-#            self.net_to_parse.close()
-            LOG.info('%s net exit...'%self.address)
-            self.net_to_parse.send('exit')
+        pass
 
 class testManage(net):
     def __init__(self, sock, addr):
@@ -149,7 +137,7 @@ class testManage(net):
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
         
         self.task_reHeart = stackless.tasklet(self.reHeart)(10)
-        self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
+        self.task_chkHeart = stackless.tasklet(self.chkHeart)(60)
         CHList[self.address] = self.broadcast
         self.task_receive = stackless.tasklet(self.receive)()
         
@@ -157,6 +145,22 @@ class testManage(net):
         self.user = None
         self.uid = None
         self.cltlist = []
+        
+    def exit(self):
+        global CONTROL, CHList
+        self.switch = False
+        if self.address in CHList.keys():    #不是CONTROL
+            del(CHList[self.address])
+            if CONTROL:
+                info = '%s heart time out or disconnect ...'%self.address
+                CONTROL.send(mylib.package.pack2(info))
+            self.chkEnd(self.address)
+            if self.uid in CHList.keys() and self.broadcast in CHList[self.uid]:       #client.exe退出时关闭该链接虚拟登录
+                CHList[self.uid].remove(self.broadcast)
+        else:
+            CONTROL = None
+            self.dispense('exit')
+        LOG.info('%s testManage exit...'%self.address)
     
     def listen_message(self):
         global CLTLIST, CONTROL, RUN
@@ -164,18 +168,6 @@ class testManage(net):
         pbr = Response()
         while self.switch:
             r_pack = self.net_to_parse.receive()
-            if r_pack == 'exit':
-                self.switch = False
-                if self.address in CHList.keys():
-                    del(CHList[self.address])
-                    self.chkEnd(self.address)
-                    if self.user in LoginInfo.keys() and self.broadcast in CHList[self.uid]:       #client.exe退出时关闭该链接虚拟登录
-                        CHList[self.uid].remove(self.broadcast)
-                else:
-                    self.dispense('exit')
-#                self.net_to_parse.close()
-                LOG.info('%s test_manage exit...'%self.address)
-                break
             if r_pack[1] != 0xABDE:
                 LOG.info('received head from %s : [%d, %2x]'%(self.address, 
                                                               r_pack[0], 
@@ -196,7 +188,7 @@ class testManage(net):
                     for addr in CHList.keys():
                         if ':' in ip and ip == addr:
                             CLTLIST.append(ip)
-                            CHList[ip].send('%sip:%s'%(s_pack, self._myIP(re.split(':', ip)[0])))
+                            CHList[ip].send('%sip:%s'%(s_pack, self._myIP(ip.split(':')[0])))
                             LOG.info('send to %s'%ip)
                             fail = False
                             break
@@ -212,7 +204,8 @@ class testManage(net):
                 if not CLTLIST:
                     self.broadcast.send(self.e_pack)
             elif r_pack[1] in [0x0002, 0x0004]:
-                CONTROL.send(r_pack[2])
+                if CONTROL:
+                    CONTROL.send(r_pack[2])
             elif r_pack[1] in [0x0003, 0xffff]:
                 self.dispense(r_pack[2])
             elif r_pack[1] == 0x0005:
@@ -264,7 +257,7 @@ class testManage(net):
                     LOG.info('%s_%s send http request : %s'%(user,
                                                              self.address, 
                                                              url))
-                    mdata = urllib.urlopen(url).read()
+                    mdata = urlopen(url).read()
                     pbr.ParseFromString(mdata)
                     LOG.info('%s_%s receive http response : %s'%(user, 
                                                                  self.address, 
@@ -278,7 +271,8 @@ class testManage(net):
                                                             self.address))
                         self.broadcast.send(mylib.package.make_response_clt(mdata))
                     else:
-                        del(LoginInfo[user])
+                        if self.user in LoginInfo.keys():
+                            del(LoginInfo[self.user])
                         LOG.error('%s_%s double logined failed !'%(user, 
                                                                    self.address))
                 
@@ -303,7 +297,7 @@ class testManage(net):
                 CONTROL.send(self.e_pack)
 
     def getCltList(self, r_pack):
-        cltstring_len = int(struct.unpack('<H', r_pack[2][6:8])[0])
+        cltstring_len = int(unpack('<H', r_pack[2][6:8])[0])
         if cltstring_len == 0xffff:
             self.cltlist = [ip for ip in CHList.keys() if ':' in ip]   #没有':'则为virtual_message的链接,需要排除
             cltstring_len = 0
@@ -321,9 +315,9 @@ class testManage(net):
                                                      ord(cltstring[i+3]),
                                                      port))
         m_pack = r_pack[2][8 + cltstring_len : ]
-        s_pack = struct.pack('<LH', 
-                             r_pack[0] - cltstring_len + 16,     #16 = 18 - 2
-                             r_pack[1])
+        s_pack = pack('<LH', 
+                      r_pack[0] - cltstring_len + 16,     #16 = 18 - 2
+                      r_pack[1])
         s_pack += m_pack
         return s_pack
 
@@ -346,22 +340,22 @@ class VirtualMessage_to_Client(net):
         self.uid = None
         self.sid = None
         self.user = None
+        
+    def exit(self):
+        self.switch = False
+        if self.uid in CHList.keys():
+            if self.broadcast in CHList[self.uid]:
+                CHList[self.uid].remove(self.broadcast)
+            if len(CHList[self.uid]) <= 1:
+                self.do_logout()
+        LOG.info('%s Client exit...'%self.address)
 
     def listen_message(self):
         while self.switch:
             try:
                 r_pack = self.net_to_parse.receive()
-                if r_pack == 'exit':
-#                    self.net_to_parse.close()
-                    if self.uid and self.uid in CHList.keys():
-                        if self.broadcast in CHList[self.uid]:
-                            CHList[self.uid].remove(self.broadcast)
-                        if len(CHList[self.uid]) <= 1:
-                            self.do_logout()
-                    LOG.info('%s Client exit...'%self.address)
-                    break
                 mdata = r_pack[2]
-                cmd = struct.unpack("<H", mdata[8 : 10])[0]
+                cmd = unpack("<H", mdata[8 : 10])[0]
                 if cmd != 0x9006:
                     LOG.info('received head from %s_%s_%s : [%d, %2x]'%(self.user, 
                                                                         self.uid, 
@@ -393,7 +387,7 @@ class VirtualMessage_to_Client(net):
                             LOG.info('%s_%s send http request : %s'%(user,
                                                                      self.address, 
                                                                      url))
-                            mdata = urllib.urlopen(url).read()
+                            mdata = urlopen(url).read()
                             pbr.ParseFromString(mdata)
                             LOG.info('%s_%s receive http response : %s'%(user, 
                                                                          self.address, 
@@ -417,7 +411,7 @@ class VirtualMessage_to_Client(net):
                             LOG.info('%s_%s send http request: %s'%(user, 
                                                                     self.address, 
                                                                     url))
-                            mdata = urllib.urlopen(url).read()
+                            mdata = urlopen(url).read()
                             pbr.ParseFromString(mdata)
                             LOG.info('%s_%s receive http response: %s'%(user, 
                                                                         self.address, 
@@ -454,14 +448,14 @@ class VirtualMessage_to_Client(net):
                                                                          self.address, 
                                                                          cmd, 
                                                                          r_pack.__repr__()))
-                LOG.error(traceback.format_exc())
+                LOG.error(format_exc())
 
     def do_logout(self):
         if self.uid in CHList.keys() and self.user in LoginInfo.keys():
             pbr = Response()
             url = '%s/user.tcplogout/?alt=pbbin&sid=%s&service=msg'%(APPSERVER,
                                                                      self.sid)
-            mdata = urllib.urlopen(url).read()
+            mdata = urlopen(url).read()
             LOG.info('%s_%s_%s send http request: %s'%(self.user, 
                                                        self.uid, 
                                                        self.address, 
@@ -493,20 +487,20 @@ class VirtualMessage_to_Service(net):
         self.headformat = '<HL'
         self.windage = 2
         self.task_receive = stackless.tasklet(self.receive)()
-        
         self.package = None
         
+    def exit(self):
+        self.switch = False
+        LOG.info('%s APP Service exit...'%self.address)
+
     def listen_message(self):
         while self.switch:
             try:
                 r_pack = self.net_to_parse.receive()  #r_pack[0] 包长度, r_pack[1]magic_code, r_pack[2]收到的完成数据包
                 LOG.debug('received package from APP Service %s : %s'%(self.address, 
                                                                        r_pack[2].__len__()))
-                if r_pack == 'exit':
-                    LOG.info('%s APP Service exit...'%self.address)
-                    break
                 mdata = r_pack[2]
-                cmd = struct.unpack("<H", mdata[8 : 10])[0]
+                cmd = unpack("<H", mdata[8 : 10])[0]
                 LOG.info('APP Service %s code: %x'%(self.address, 
                                                     cmd))
                 if cmd == 0x7001:
@@ -527,13 +521,13 @@ class VirtualMessage_to_Service(net):
                 LOG.error('listen message error from APP Service %s : %x, %s'%(self.address,
                                                                                cmd, 
                                                                                r_pack.__repr__()))
-                LOG.error(traceback.format_exc())
+                LOG.error(format_exc())
 
     def getReceivers(self, package):
-        receivers_len = struct.unpack("<H", package[14 : 16])[0]
+        receivers_len = unpack("<H", package[14 : 16])[0]
         receivers_string = package[16 : receivers_len * 4 + 16]
         self.package = package[receivers_len * 4 + 16 : ]
-        receivers_list = struct.unpack('<%sL'%receivers_len, receivers_string)
+        receivers_list = unpack('<%sL'%receivers_len, receivers_string)
         return receivers_list
 
 def TestThread():

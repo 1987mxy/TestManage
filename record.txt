@@ -1,4 +1,4 @@
-modify folder name 'srv' to 'client'
+﻿modify folder name 'srv' to 'client'
 modify folder name 'clt' to 'control'
 create folder 'server' make to transfer service(Virtual MessageServer)
 create folder 'lib' make to public call library for three module
@@ -59,3 +59,10 @@ error log print stack information(traceback.format_exc)
 reconstruction server.py net class be inherit to testManage, VirtualMessage_to_Service and VirtualMessage_to_Client class
 appear error "AttributeError: a instance has no attribute 'address'" and detail log wait bug appear
 creat gmclient_watcher chack gmclient error information and get screen
+fixed error that timeout becontroled haven't response while run control.exe
+expand timeout to 60 sec
+=========================================
+3-23
+user secure means that user command "netstat -na" to find port of GMClient.exe process check status of GMClient.exe process
+creat virtual function is "exit"
+command "cmd" display return information

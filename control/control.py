@@ -3,7 +3,9 @@
 import sys
 sys.path.append('..\\lib')
 
-import os, socket, traceback
+import socket
+from os import system
+from traceback import format_exc
 from struct import unpack, pack
 from re import sub, split
 from datetime import datetime
@@ -141,19 +143,16 @@ class MainOperation(object):
             t.connect()
             t.send()
             t.socket.settimeout(60)
-            if OTHER == 'update':
-                t.close()
-            else:
-                t.receive()
-                t.runCommand()
+            t.receive()
+            t.runCommand()
         except Exception, e:
             if e.message != 'timed out':
-                LOG.error('%s : %s\n'%(SERVER, traceback.format_exc()))
+                LOG.error('%s : %s\n'%(SERVER, format_exc()))
             else:
                 LOG.error('%s : time out!'%SERVER)
             t.close()
         if OTHER == 'up':
-            os.system('explorer "%s"'%PATH['logpath'])
+            system('explorer "%s"'%PATH['logpath'])
 
     def makeCMDString(self, dtldata):
         string = ''
@@ -192,4 +191,4 @@ if __name__ == '__main__':
     cmds = CONF.getCMD()
     for cmd in cmds:
         MainOperation().operation(cmd)
-    os.system('pause')
+    system('pause')

@@ -1,5 +1,6 @@
 #coding=gbk
-import os
+from os import system, path
+from os import path as ospath
 from struct import pack, calcsize
 from time import sleep
 
@@ -28,7 +29,7 @@ def pack3(path, names):  #下载更新文件包
         packages = ''
         chkPath(r'.\temp')
         for n in names:
-            if n == '*.*' or os.path.exists('%s%s'%(path, n)):
+            if n == '*.*' or ospath.exists('%s%s'%(path, n)):
                 runCMD('copy /y "%s%s" ".\\temp\\%s"'%(path, n, n))
             else:
                 raise Exception('%s%s not exists!'%(path, n))
@@ -47,7 +48,7 @@ def pack3(path, names):  #下载更新文件包
                                 0x0003)
         package = '%s%s'%(filepack_handler, data[filepack_len * PACKAGE_SIZE:])
         packages = '%s%s'%(packages, package)
-        LOG.info('send filesize is %s Byte'%packages.__len__())
+        LOG.info('send filepackage_size is %s Byte'%packages.__len__())
         return packages
     
 def pack4(ip, spath, names):  #上传LOG文件包
@@ -64,7 +65,7 @@ def pack4(ip, spath, names):  #上传LOG文件包
             r = runCMD(r'copy /y "%s%s" ".\temp\%s_%s"'%(spath, n, ip, realn))
             r = r[:r.__len__()-1]
             result = '%s%s%s_%s\n'%(result, r, ip, realn)
-        os.system('msg %username% "log已收集,请继续测试!"')
+        system('msg %username% "log已收集,请继续测试!"')
         LOG.debug(mylib.rar.compression('up', '.\\temp\\', ns))
         LOG.info('成功压缩文件')
         data = open(r'.\temp\up.rar','rb').read()

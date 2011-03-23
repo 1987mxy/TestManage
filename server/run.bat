@@ -1,2 +1,2 @@
-D:\Python25\python.exe server.py
+python.exe server.py
 pause
