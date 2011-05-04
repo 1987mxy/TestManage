@@ -56,10 +56,19 @@ settings中VirtualMessage是关闭和打开虚拟message服务器的开关
 testmachine3-14
 控制端的config.ini中添加步骤conf用来对客户端段的config.ini的单项行进修改
 ===================================
-testmachine4-23
+testmachine3-23
 修复了端口为172的错误
 详细了error日志
 控制端增加了响应统计信息
 gmclient_watcher可以检测到gmclient的信息发现相应错误并截屏
 修复在执行中heart time out问题
 修改心跳超时时间为60秒
+===================================
+testmachine3-28
+在config.ini的service域添加了status项，用来切换程序在debug模式和release模式之间
+===================================
+testmachine3-29
+控制端的config.ini文件中list列表的首字符为"!"，则该列表为取反列表
+===================================
+testmachine3-31
+添加了与GMClient心跳检测

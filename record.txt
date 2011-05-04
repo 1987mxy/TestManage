@@ -2,7 +2,7 @@
 modify folder name 'clt' to 'control'
 create folder 'server' make to transfer service(Virtual MessageServer)
 create folder 'lib' make to public call library for three module
-user new port is 8782
+use new port is 8782
 import stackless and stacklesssocket
 independence rar.py,config.py,compress.py(don't done)
 create settings file is 'settings.py'
@@ -66,3 +66,27 @@ expand timeout to 60 sec
 user secure means that user command "netstat -na" to find port of GMClient.exe process check status of GMClient.exe process
 creat virtual function is "exit"
 command "cmd" display return information
+=========================================
+3-25
+add magic code in testmanage logic, the code is "0xAAAC"
+change testmanage package head format to "<HLHHL" that is package size(2Byte), magic code(4Byte), package size(2Byte), command code(2Byte) and unknow code default is 0(4Byte)
+summary service config to enum type in settings.py
+=========================================
+3-28
+add items "status" in service sections of config.ini file which change debug mode and release mode(the different is log output)
+fixed bug that is close control when wait response and send find request cause banish client in client list
+=========================================
+3-29
+change method for get client list
+the client list is exclude list if the first word is "!" in client list of control
+=========================================
+3-31
+fixed app wait response time out
+open heart beat check for GMClient
+fixed status change "release" invalidation
+=========================================
+4-1
+optimize splice 0x0003 and 0x0004 package method
+=========================================
+5-4
+change asynchronism method socket.close() to synchronization method socket.shutdown()

@@ -10,12 +10,12 @@ from time import sleep
 from struct import unpack, pack
 from _winreg import *
 
-from mylib.config import CONF
-from mylib.log import LOG
+from mylib.log import LOG, get_screen
 from mylib.other import runCMD, chkPath
 from mylib.msg_base_pb2 import Msg
 import mylib.rar
 import mylib.package
+from mylib.config import CONF
 
 IP = None
 PATH = {}
@@ -30,24 +30,24 @@ def _getIP():
     ipcfg = inf.readlines()
     for i in xrange(len(ipcfg)):
         lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])   
-        if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i+2]):
+        if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i + 2]):
             return lineinf[0]
 
 def _findPath(flag):
-    global PATH,CONF
+    global PATH, CONF
     LOG.info('sreach file ...')
     r = GetLogicalDrives()
-    for d in range(2,27):
-        if(r>>d&1):
+    for d in range(2, 27):
+        if(r >> d & 1):
             import string
-            drive = '%s:\\'%string.ascii_letters[d]
-            for localpath,fields,files in os.walk(drive):
+            drive = '%s:\\' % string.ascii_letters[d]
+            for localpath, fields, files in os.walk(drive):
                 if flag in files:
-                    if open(r'%s\%s'%(localpath, flag), 'r').read() == '95279527':
-                        CONF.save('localpath', flag, '%s\\'%localpath)
+                    if open(r'%s\%s' % (localpath, flag), 'r').read() == '95279527':
+                        CONF.save('localpath', flag, '%s\\' % localpath)
                         PATH[flag] = localpath
-                        LOG.info('localpath : %s\\'%localpath)
-                        return '%s\\'%localpath
+                        LOG.info('localpath : %s\\' % localpath)
+                        return '%s\\' % localpath
     LOG.info('localpath: path is none!')
     return ''
 
@@ -57,10 +57,10 @@ def _manageChar(path, char):   #¸ù¾İÍ¨Åä·ûµÃµ½ÏàÓ¦ÎÄ¼şÁĞ±í,Èç¹ûÖ±½ÓÓÃÍ¨Åä·ûÎŞ·¨Ô
         spath = re.split(r'\\', char)[0]
     else:
         spath = ''
-    result = os.popen(r'dir "%s%s"'%(path, char)).read()
+    result = os.popen(r'dir "%s%s"' % (path, char)).read()
     result = re.split(r'\n', result)
-    for line in result[5:len(result)-3]:
-        filename.append('%s\\%s'%(spath,re.split(' +', line, 3)[3]))
+    for line in result[5:len(result) - 3]:
+        filename.append('%s\\%s' % (spath, re.split(' +', line, 3)[3]))
     return filename
 
 class ManageClient(object):
@@ -77,19 +77,19 @@ class ManageClient(object):
 
     def send(self):
         self.socket.sendall(self.s_pack)
-        LOG.debug('send to Service : %s'%self.s_pack.__len__())
+        LOG.debug('send to Service : ', self.s_pack)
     
     def close(self):
         self.switch = False
-        self.socket.close()
+        self.socket.shutdown()
     
     def reset(self):
         self.file = None
         self.search = ''
-        self.s_pack = ''
+        self.s_pack = []
         self.r_pack = []
         self.localpath = ''
-        self.result = ''
+        self.result = []
         self.switch = True
         
     def reconnect(self):
@@ -100,7 +100,7 @@ class ManageClient(object):
         pdata = ''
         while self.switch:
             rdata = self.socket.recv(4096)
-            LOG.debug('receive raw_string from Service : %s'%rdata.__len__())
+            LOG.debug('receive raw_string from Service : ', rdata)
             if not rdata:
                 LOG.error('disconnect...')
                 self.close()
@@ -109,104 +109,108 @@ class ManageClient(object):
                 
     def parseHead(self, data):
         global GMPORT
-        if len(data) >= 6:
-            head = unpack('<HL', data[:6])
-            if head[1] == 0xABDE:
-                if head[0] <= len(data):
-                    mdata = data[ : head[0] + 2]
-                    data = data[head[0] + 2 : ]
-                    package = unpack("<HLHHL%ss"%(head[0]-12), mdata)
-                    if package[3] == 0x9003:
-                        self.msg.ParseFromString(package[5])
+        if len(data) >= 14:
+            head = unpack('<HLHHL', data[:14])
+            if head[0] + 2 <= len(data):
+                mdata = data[ : head[0] + 2]
+                data = data[head[0] + 2 : ]
+                if head[1] == 0xABDE:
+                    if head[3] == 0x9003:
+                        self.msg.ParseFromString(mdata[14:])
                         if self.msg.code == 0x230d and (not self.msg.arenaEnded.error):
-                            LOG.info('Arena End info : %s'%package[5].__len__())
-                            os.system('taskkill /f /im war3.exe')
-                            os.system('taskkill /f /im startcraft.exe')
-#                            os.system('close_war3.exe')
-                    elif package[3] == 0x9002:
+                            GameStatus = os.getenv('GAMESTATUS')    #»ñÈ¡»·¾³±äÁ¿ 
+                            if GameStatus != None and int(GameStatus) < 4:
+                                get_screen()
+                            LOG.info('Arena End info : ', mdata[14:])
+                            runCMD('taskkill /f /im war3.exe')
+                            runCMD('taskkill /f /im startcraft.exe')
+                            LOG.info('Process Killed !')
+                            #os.system('start "" /d "%s" "GMClient.exe"'%os.getenv('TEMPPATH'))
+    #                       os.system('close_war3.exe')
+                    elif head[3] == 0x9002:
                         self.login = not self.login
                         if self.login:
-                            os.system('gmclient_watcher.vbs %s'%GMPORT)
+                            #os.system('gmclient_watcher.vbs %s'%GMPORT)
+                            LOG.info('Virtual User logined !')
                         else:
                             os.system('taskkill /f /im gmclient_watcher.exe')
-                    data = self.parseHead(data)
-            else:
-                head = unpack('<LH', data[:6])
-                if head[1] == 0xffff:
-                    LOG.info('received head from Service : [%d, %2x]'%(head[0], 
-                                                                       head[1]))
-                    LOG.debug('received package from Service : %s'%data[:head[0]].__len__())
-                    self.do()
-                    self.send()
-                    if self.search:
-                        PATH[self.search]=_findPath(self.search)
-                    LOG.info('='*30)
-                    self.reset()
-                    data = ''
-                if head[0] <= len(data):
-                    mdata = data[:head[0]]
-                    data = data[head[0]:]
-                    if head[1] == 0x0006:
+                            LOG.info('Virtual User logouted !')
+                elif head[1] == 0xAAAC:
+                    if head[3] == 0xffff:
+                        LOG.info('received head from Service : [%d, %2x]' % (head[0],
+                                                                           head[3]))
+                        LOG.debug('received package from Service : ', mdata)
+                        self.listen_message()
+                        self.send()
+                        if self.search:
+                            PATH[self.search] = _findPath(self.search)
+                        LOG.info('='*30)
+                        self.reset()
+                        data = ''
+                    elif head[3] == 0x0006:
                         self.socket.send(mdata)
                         if not self.login:
                             self.chkGMClient()
                         LOG.debug('received heart!')
-                    elif head[1] != 0xffff:
-                        self.r_pack.append([head[0], head[1], mdata])
-                        LOG.info('received handler from Service : [%d, %2x]'%(head[0], 
-                                                                              head[1]))
-                        LOG.debug('received package from Service : %s'%mdata.__len__())
-                    data = self.parseHead(data)
+                    else:
+                        self.r_pack.append([head[0], head[3], mdata])
+                        LOG.info('received handler from Service : [%d, %2x]' % (head[0],
+                                                                              head[3]))
+                        LOG.debug('received package from Service : ', mdata)
+                else:
+                    LOG.error('receive FIFA package from %s : %s' % (self.address, mdata.__repr__()))
+                    self.close()
+                data = self.parseHead(data)
         return data
     
-    def do(self):
+    def listen_message(self):
         filesize = 0
         global IP, PATH
-        for len, type, data in self.r_pack:
-            if type == 0x0003:
+        for len, cmd, data in self.r_pack:
+            if cmd == 0x0003:
                 if self.file:
-                    self.file.write(data[6:])
+                    self.file.write(data[14:])
                 else:
                     chkPath(r'.\temp')
-                    self.file = open(r'.\temp\down.rar','wb')
-                    self.file.write(data[6:])
+                    self.file = open(r'.\temp\down.rar', 'wb')
+                    self.file.write(data[14:])
                 filesize += data.__len__()
         if self.file:
             self.file.close()
-            LOG.info('receive filesize is %s'%filesize)
-        for len, type, data in self.r_pack:
-            if type == 0x0001:
-                data = self.readString(data[6:]) 
+            LOG.info('receive filesize is %s' % filesize)
+        for len, cmd, data in self.r_pack:
+            if cmd == 0x0001:
+                data = self.readString(data[14:]) 
                 if data['ip'] == IP:
                     self.fip = IP
                 else:
-                    t = re.split('\.',IP)
-                    t = t[t.__len__()-1]
-                    self.fip = '%s_%s'%(data['ip'], t)
+                    t = re.split('\.', IP)
+                    t = t[t.__len__() - 1]
+                    self.fip = '%s_%s' % (data['ip'], t)
                 if 'open' in data.keys() or 'down' in data.keys() or 'up' in data.keys() or 'delete' in data.keys(): 
                     if data['localpath'] in PATH.keys() and os.path.exists(PATH[data['localpath']] + data['localpath']):
                         self.localpath = PATH[data['localpath']]
+                        os.environ['TEMPPATH'] = self.localpath
                         self.operation(data)
                     else:
-                        self.result = '%s: path is none!\n'%self.fip
+                        self.result += [self.fip, ' : path is none!\n']
                         self.search = data['localpath']
                         break
                 else:
                     if not data['localpath'] in PATH.keys():
-                        PATH[data['localpath']]=''
+                        PATH[data['localpath']] = ''
                     self.operation(data)
-        self.s_pack = '%s%s'%(self.s_pack, mylib.package.pack2(self.result))
-        self.s_pack = '%s%s'%(self.s_pack, self.e_pack)
+        self.s_pack = ''.join(self.s_pack + [mylib.package.pack2(''.join(self.result)), self.e_pack])
 
     #================½âÎöÊı¾İ±¨=================
-    def readString(self,data):
-        data = re.findall("(?:^|\<)([^:]*):([^<]*)",data)
+    def readString(self, data):
+        data = re.findall("(?:^|\<)([^:]*):([^<]*)", data)
         data = dict(data)
         data['ip'] = re.sub('\*', '', data['ip'])
         return data
     #================½âÎöÊı¾İ±¨=================
 
-    def operation(self,data):
+    def operation(self, data):
         global IP
         rule = data['step']                 #¶¯×÷²½ÖèºÍË³Ğò
         try:
@@ -221,46 +225,47 @@ class ManageClient(object):
                         self.socket.settimeout(0)
                         r = mylib.package.pack4(self.fip, self.localpath, fs)
                         self.socket.settimeout(60)
-                        self.result = '%s%s'%(self.result, r[0])
-                        self.s_pack = '%s%s'%(self.s_pack, r[1])
+                        self.result.append(r[0])
+                        self.s_pack.append(r[1])
                     continue
                 #================ÉÏ´«Log=================
+                #================ÏÂÔØÎÄ¼ş=================
+                elif step == 'down':
+                    chkPath('%shistory' % self.localpath)
+                    for flag in re.split('\|', data['down']):
+                        tcmd = '%shistory\\%s' % (self.localpath, flag)
+                        runCMD('del /q /f "%s(5)"' % tcmd)
+                        runCMD('ren "%s(4)" "%s(5)"' % (tcmd, flag))
+                        runCMD('ren "%s(3)" "%s(4)"' % (tcmd, flag))
+                        runCMD('ren "%s(2)" "%s(3)"' % (tcmd, flag))
+                        runCMD('ren "%s(1)" "%s(2)"' % (tcmd, flag))
+                        runCMD('copy /y "%s" "%s(1)"' % (self.localpath + flag, tcmd))
+                        LOG.info('³É¹¦ÏÂÔØÎÄ¼ş%s' % flag)
+                        self.result += ['³É¹¦ÏÂÔØÎÄ¼ş', flag, '\n']
+                    self.socket.settimeout(0)
+                    LOG.debug(mylib.rar.decompression('down', self.localpath)) #½âÑ¹ÎÄ¼ş
+                    self.socket.settimeout(60)
+                    LOG.info('³É¹¦½âÑ¹µ½%s' % self.localpath)
+                    self.result += ['³É¹¦½âÑ¹µ½', self.localpath, '\n']
+                #================ÏÂÔØÎÄ¼ş================= 
                 for flag in re.split('\|', data[step]):
                     #================É±½ø³Ì=================
                     if step == 'kill':
-                        self.result = '%s%s'%(self.result, runCMD(r'taskkill /f /im %s'%flag))
+                        self.result.append(runCMD(r'taskkill /f /im %s' % flag))
                     #================É±½ø³Ì=================
                     #================¿ª½ø³Ì=================
                     elif step == 'open':
-                        runCMD('start "" /d "%s" "%s"'%(self.localpath, flag))
+                        self.result.append(runCMD('start "" /d "%s" "%s"' % (self.localpath, flag)))
                     #================¿ª½ø³Ì=================
-                    #================ÏÂÔØÎÄ¼ş=================
-                    elif step == 'down':
-                        chkPath('%shistory'%self.localpath)
-                        tcmd = '%shistory\\%s'%(self.localpath, flag)
-                        runCMD('del /q /f "%s(5)"'%tcmd)
-                        runCMD('ren "%s(4)" "%s(5)"'%(tcmd,tcmd))
-                        runCMD('ren "%s(3)" "%s(4)"'%(tcmd,tcmd))
-                        runCMD('ren "%s(2)" "%s(3)"'%(tcmd,tcmd))
-                        runCMD('ren "%s(1)" "%s(2)"'%(tcmd,tcmd))
-                        runCMD('copy /y "%s" "%s(1)"'%(self.localpath + flag,tcmd))
-                        LOG.info('³É¹¦ÏÂÔØÎÄ¼ş%s'%flag)
-                        self.result = '%s³É¹¦ÏÂÔØÎÄ¼ş%s\n'%(self.result, flag)
-                        self.socket.settimeout(0)
-                        LOG.debug(mylib.rar.decompression('down', self.localpath)) #½âÑ¹ÎÄ¼ş
-                        self.socket.settimeout(60)
-                        LOG.info('³É¹¦½âÑ¹µ½%s'%self.localpath)
-                        self.result = '%s³É¹¦½âÑ¹µ½%s\n'%(self.result, self.localpath)
-                    #================ÏÂÔØÎÄ¼ş=================
                     #================CMDÃüÁî=================
                     elif step == 'cmd':
-                        self.result = '%s%s\n'%(self.result, runCMD('%s'%flag))
+                        self.result += [runCMD(flag), '\n']
                     #================CMDÃüÁî=================
                     #================ĞŞ¸ÄconfigÎÄ¼ş=================
                     elif step == 'conf':
                         para = re.split('-', data[step])
                         CONF.save(para[0], para[1], para[2])
-                        fileRestart = open('restart.bat','w')
+                        fileRestart = open('restart.bat', 'w')
                         cmds = r'''
                                 taskkill /f /im client.exe
                                 taskkill /f /im gmclient_watcher.exe
@@ -276,7 +281,7 @@ class ManageClient(object):
                         chkPath(r'.\update')
                         os.popen(r'del /q /f .\update\*.*')
                         LOG.debug(mylib.rar.decompression('down', '.\\update\\')) #½âÑ¹updateÎÄ¼ş
-                        fileUpdate = open('update.bat','w')
+                        fileUpdate = open('update.bat', 'w')
                         cmds = r'''
                                 taskkill /f /im client.exe
                                 taskkill /f /im gmclient_watcher.exe
@@ -291,15 +296,15 @@ class ManageClient(object):
                     #================×ÔÎÒ¸üĞÂ=================
                     #================É¾³ıÎÄ¼ş=================
                     elif step == 'delete':
-                        r = runCMD('del /q /f "%s%s"'%(self.localpath, flag))
+                        r = runCMD('del /q /f "%s%s"' % (self.localpath, flag))
                         if r:
-                            self.result = '%s%s'%(self.result, r)
+                            self.result.append(r)
                         else:
-                            self.result = '%s³É¹¦É¾³ı%s\n'%(self.result, flag)
+                            self.result += ['³É¹¦É¾³ı', flag, '\n']
                     #================É¾³ıÎÄ¼ş=================
-            self.result = '%s : done\n%s\n%s'%(self.fip, self.localpath, self.result)
+            self.result = ''.join([self.fip, ' : done\n', self.localpath, '\n'] + self.result)
         except :
-            self.result = '%s error : %s\n%s\n%s'%(self.fip, format_exc(), self.localpath, self.result)
+            self.result = ''.join([self.fip, ' error : ', format_exc(), '\n', self.localpath, '\n'] + self.result)
             LOG.error(self.result)
             
 
@@ -307,22 +312,24 @@ class ManageClient(object):
         global GMPORT
         netcmd = os.popen('netstat -na')
         port_info = netcmd.read()
-        gmport_info = re.findall('\s0\.0\.0\.0:%s\s'%GMPORT, port_info)
+        gmport_info = re.findall('\s0\.0\.0\.0:%s\s' % GMPORT, port_info)
         if gmport_info:
             self.GMlogin()
 
     def GMlogin(self):
         global USER, PASSWD
         """µÇÂ½msg·şÎñÆ÷"""
-        msg_data = '\x08\x01\x12%s%s\x1a%s%s'%(chr(USER.__len__()), 
-                                               USER, 
-                                               chr(PASSWD.__len__()), 
-                                               PASSWD)
+        msg_data = ''.join(['\x08\x01\x12',
+                            chr(USER.__len__()),
+                            USER,
+                            '\x1a',
+                            chr(PASSWD.__len__()),
+                            PASSWD])
         len_msg_data = len(msg_data)
-        string = pack("<LHHHL%ss"%len_msg_data,    #µÚÒ»ºÍµÚ¶ş×Ö¶Î¿í¶È¶Ô»»
-                      len_msg_data + 14,     #12 = 4+2+2+2+4
-                      0xABDE, # magic code
-                      len_msg_data + 14,
+        string = pack("<HLHHL%ss" % len_msg_data, #µÚÒ»ºÍµÚ¶ş×Ö¶Î¿í¶È¶Ô»»
+                      len_msg_data + 12, #12 = 4+2+2+2+4-2
+                      0xAAAC, # magic code
+                      len_msg_data + 12,
                       0x9001,
                       0,
                       msg_data)
@@ -345,5 +352,6 @@ if __name__ == '__main__':
             sock.settimeout(60)
             ManageClient(sock)
         except:
+            os.system('taskkill /f /im gmclient_watcher.exe')
             LOG.error(format_exc())
         sleep(30)

@@ -1,14 +1,28 @@
 #coding=gbk
 
 #===============================================================================
-# port
+# parameter
 #===============================================================================
 
-CLT_PORT = 16667
+class ServiceParameter:
+    port = None
+    magicCode = None
+    heartCode = None
 
-APP_PORT = 13340
+TestManage = ServiceParameter()
+TestManage.port = 8782
+TestManage.magicCode = 0xAAAC
+TestManage.heartCode = 0x0006
 
-TEST_PORT = 8782
+VirtualMessagetoClient = ServiceParameter()
+VirtualMessagetoClient.port = 16667
+VirtualMessagetoClient.magicCode = 0xABDE
+VirtualMessagetoClient.heartCode = 0x9006
+    
+VirtualMessagetoService = ServiceParameter()
+VirtualMessagetoService.port = 13340
+VirtualMessagetoService.magicCode = 0xABCD
+VirtualMessagetoService.heartCode = None
 
 #===============================================================================
 # log
@@ -21,8 +35,10 @@ PRINT_RUNLOG = True
 PRINT_PERFORMANCELOG = True
 
 #===============================================================================
-# service
+# program parameter
 #===============================================================================
+
+Status = 'debug'
 
 VirtualMessage = True
 
@@ -33,11 +49,3 @@ APPSERVER = r'http://172.16.4.2:8083/campus/api'
 #===============================================================================
 
 PACKAGE_SIZE = 600  #0x0003包长度
-
-#===============================================================================
-# MAGIC CODE
-#===============================================================================
-
-MAGIC_SRV = 0xABCD
-
-MAGIC_CLT = 0xABDE

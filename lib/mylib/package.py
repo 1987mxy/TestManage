@@ -12,21 +12,25 @@ import mylib.rar
 
 def pack1(cltlist_string, cmdpack):  #指令包
     mdata_len = cltlist_string.__len__() + cmdpack.__len__()
-    package = pack('<LH%ss'%mdata_len, 
-                   6 + mdata_len, 
-                   0x0001,
-                   '%s%s'%(cltlist_string, cmdpack))
+    package = pack('<HLHHL%ss'%mdata_len, 12 + mdata_len, 
+                                          0xAAAC, 
+                                          12 + mdata_len, 
+                                          0x0001, 
+                                          0, 
+                                          '%s%s'%(cltlist_string, cmdpack))
     return package                   
 
 def pack2(result):  #反馈包
-    package = pack('<LH%ss'%result.__len__(), 
-                   result.__len__() + 6, 
-                   0x0002, 
-                   result)
+    package = pack('<HLHHL%ss'%result.__len__(), 12 + result.__len__(), 
+                                                 0xAAAC, 
+                                                 12 + result.__len__(), 
+                                                 0x0002, 
+                                                 0, 
+                                                 result)
     return package
     
 def pack3(path, names):  #下载更新文件包
-        packages = ''
+        packages = []
         chkPath(r'.\temp')
         for n in names:
             if n == '*.*' or ospath.exists('%s%s'%(path, n)):
@@ -37,23 +41,26 @@ def pack3(path, names):  #下载更新文件包
         LOG.info('压缩文件%s'%names)
         data = open(r'.\temp\down.rar','rb').read()
         filepack_len = data.__len__()/PACKAGE_SIZE
-        filepack_handler = pack('<LH', 
-                                6 + PACKAGE_SIZE, 
-                                0x0003)
+        filepack_handler = pack('<HLHHL', 12 + PACKAGE_SIZE, 
+                                          0xAAAC, 
+                                          12 + PACKAGE_SIZE, 
+                                          0x0003, 
+                                          0)
         for i in range(filepack_len):
-            package = '%s%s'%(filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE])
-            packages = '%s%s'%(packages, package)
-        filepack_handler = pack('<LH', 
-                                6 + data.__len__() - filepack_len * PACKAGE_SIZE, 
-                                0x0003)
-        package = '%s%s'%(filepack_handler, data[filepack_len * PACKAGE_SIZE:])
-        packages = '%s%s'%(packages, package)
+            packages += [filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE]]
+        filepack_handler = pack('<HLHHL', 12 + data.__len__() - filepack_len * PACKAGE_SIZE, 
+                                          0xAAAC, 
+                                          12 + data.__len__() - filepack_len * PACKAGE_SIZE, 
+                                          0x0003, 
+                                          0)
+        packages += [filepack_handler, data[filepack_len * PACKAGE_SIZE:]]
+        packages = ''.join(packages)
         LOG.info('send filepackage_size is %s Byte'%packages.__len__())
         return packages
     
 def pack4(ip, spath, names):  #上传LOG文件包
         result = ''
-        packages = ''
+        packages = []
         ns = []
         chkPath(r'.\temp')
         for n in names:
@@ -70,41 +77,44 @@ def pack4(ip, spath, names):  #上传LOG文件包
         LOG.info('成功压缩文件')
         data = open(r'.\temp\up.rar','rb').read()
         dname = '%s_up'%ip
-        filepack_handler = pack('<LHH%ss'%dname.__len__(), 
-                                8 + dname.__len__() + PACKAGE_SIZE, 
-                                0x0004, 
-                                dname.__len__(),
-                                dname)
+        filepack_handler = pack('<HLHHLH%ss'%dname.__len__(), 14 + dname.__len__() + PACKAGE_SIZE, 
+                                                              0xAAAC, 
+                                                              14 + dname.__len__() + PACKAGE_SIZE, 
+                                                              0x0004, 
+                                                              0, 
+                                                              dname.__len__(),
+                                                              dname)
         filepack_len = data.__len__()/PACKAGE_SIZE
         for i in range(filepack_len):
-            package = '%s%s'%(filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE])
-            packages = '%s%s'%(packages, package)
+            packages += [filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE]]
 #            LOG.info(package.__repr__())#####################
-        filepack_handler = pack('<LHH%ss'%dname.__len__(), 
-                                8 + data.__len__() - filepack_len * PACKAGE_SIZE + dname.__len__(), 
-                                0x0004,
-                                dname.__len__(),
-                                dname)
-        package = '%s%s'%(filepack_handler, data[filepack_len * PACKAGE_SIZE:])
-        packages = '%s%s'%(packages, package)
+        filepack_handler = pack('<HLHHLH%ss'%dname.__len__(), 14 + data.__len__() - filepack_len * PACKAGE_SIZE + dname.__len__(), 
+                                                              0xAAAC, 
+                                                              14 + data.__len__() - filepack_len * PACKAGE_SIZE + dname.__len__(), 
+                                                              0x0004, 
+                                                              0, 
+                                                              dname.__len__(),
+                                                              dname)
+        packages += [filepack_handler, data[filepack_len * PACKAGE_SIZE:]]
+        packages = ''.join(packages)
 #        LOG.info(package.__repr__())#####################
         LOG.info('send filesize is %s Byte'%packages.__len__())
         return [result, packages]
  
 def pack5():    #获取client列表操作包
-        return '\x06\x00\x00\x00\x05\x00'
+        return '\x0c\x00\xac\xaa\x00\x00\x06\x00\x05\x00\x00\x00\x00\x00'
     
 def pack6():    #心跳包
-        return '\x06\x00\x00\x00\x06\x00'
+        return '\x0c\x00\xac\xaa\x00\x00\x06\x00\x06\x00\x00\x00\x00\x00'
 
 def packSrvEnd():
-        return '\x06\x00\x00\x00\xf0\xf0'
+        return '\x0c\x00\xac\xaa\x00\x00\x06\x00\xf0\xf0\x00\x00\x00\x00'
 
 def packCltEnd():   #给客户端的包发送完成信息
-        return '\x06\x00\x00\x00\xff\xff'
+        return '\x0c\x00\xac\xaa\x00\x00\x06\x00\xff\xff\x00\x00\x00\x00'
     
 def packCtrlEnd():   #给控制端的包发送完成信息
-        return '\x06\x00\x00\x00\x00\xff'
+        return '\x0c\x00\xac\xaa\x00\x00\x06\x00\x00\xff\x00\x00\x00\x00'
     
 def make_response_app(response_code):   
         #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4), response_code(2)

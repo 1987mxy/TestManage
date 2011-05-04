@@ -11,7 +11,8 @@ from struct import unpack, pack
 
 from mylib.log import LOG
 import mylib.package
-from mylib.settings import *
+from mylib import settings
+from mylib.other import chkPath
 
 from protobuf.msg_base_pb2 import Msg
 from protobuf.res_base_pb2 import Response
@@ -34,8 +35,19 @@ TASK_TEST = []
 SLEEP = roachlib.scheduler.DelayScheduler()  #stackless的sleep
 SLEEP.start()
 
+class MyStacklessChannel(stackless.channel):
+    def send(self, obj):
+        if not self.closing:
+            super(MyStacklessChannel, self).send(obj)
+            
+    def receive(self):
+        if not self.closing:
+            recv = super(MyStacklessChannel, self).receive()
+            return recv
+        return ''
+
 class net(object):
-    def __init__(self, sock, addr, magic = None):
+    def __init__(self, sock, addr, magic, heart):
         if self.__class__ is net:
             LOG.error('net class dose not instantiation')
             raise 'net class dose not instantiation'
@@ -43,13 +55,12 @@ class net(object):
         self.sock = sock
         self.switch = True
         self.death = False
-        self.MagicCode = magic
-        self.windage = 0   #virtual message包长度字段长度与testmanage包长度字段长度不同，用来修正
-        self.headformat = '<LH'
-        self.heart = stackless.channel()
-        self.broadcast = stackless.channel()
-        self.net_to_parse = stackless.channel()
-        
+        self.magicCode = magic
+        self.heartCode = heart
+        self.headformat = '<HLHHL'
+        self.heart = MyStacklessChannel()
+        self.broadcast = MyStacklessChannel()
+        self.net_to_parse = MyStacklessChannel()
     
     def receive(self):
         try:
@@ -57,8 +68,7 @@ class net(object):
             while self.switch:
                 LOG.debug('%s listening...'%self.address)
                 rdata = self.sock.recv(1000)
-                LOG.debug('receive raw_string from %s : %s'%(self.address, 
-                                                             rdata.__len__()))
+                LOG.debug('receive raw_string from %s : '%self.address, rdata)
                 if not rdata:
                     LOG.info('%s disconnect...'%self.address)
                     self.exit()
@@ -67,27 +77,26 @@ class net(object):
                     pdata = self.parseHead('%s%s'%(pdata, rdata))
         except :
             LOG.error('type %s : %s'%(self.__class__, dir(self)))
-            LOG.error('%s net error : %s'%(self.address,
-                                           format_exc()))
+            LOG.error('receive error : %s'%format_exc())
+            LOG.error('%s receive error : %s'%(self.address, 
+                                               format_exc()))
             self.exit()
 
     def parseHead(self, data):
         authentic = False
-        if len(data) >= 6:
-            head = unpack(self.headformat, data[:6])
-            if not self.MagicCode:
-                if (head[1] <= 6 and head[1] > 0) or (head[1] in [0xABDE,0xffff,0xff00,0xf0f0]):
-                    authentic = True
-            elif self.MagicCode == head[1]:
-                authentic = True
-            if head[0] + self.windage <= len(data):
-                mdata = data[ : head[0] + self.windage]
-                data = data[head[0] + self.windage : ]
-                #TODO: 检查返回数据的格式
-                if head[1] == 0x0006:
-                    self.heart.send(mdata)
-                elif authentic:
-                    self.net_to_parse.send([head[0], head[1], mdata])
+        if len(data) >= 14:
+            head = unpack(self.headformat, data[:14])
+            if head[0] + 2 <= len(data):
+                mdata = data[ : head[0] + 2]
+                data = data[head[0] + 2 : ]
+                if head[1] == self.magicCode:
+                    if head[3] == self.heartCode:
+                        self.heart.send(mdata)
+                    else:
+                        self.net_to_parse.send([head[0], head[3], mdata])
+                else:
+                    LOG.error('receive FIFA package from %s : '%self.address, mdata)
+                    self.exit()
                 data = self.parseHead(data)
         return data
 
@@ -98,18 +107,19 @@ class net(object):
                 if rdata == 'exit':
                     LOG.info('%s be exited!'%self.address)
                     self.exit()
+                elif self.switch:
+                    if rdata.__class__ is list:
+                        self.sock.sendall(rdata[0])
+                        LOG.debug('uuid package %s send to %s : '%(rdata[1], self.address), rdata[0])
+                    else:
+                        self.sock.sendall(rdata)
+                        LOG.debug('send to %s : '%self.address, rdata)
                 else:
-                    self.sock.sendall(rdata)
-                    LOG.debug('send to %s : %s'%(self.address, 
-                                                 rdata.__len__()))
+                    LOG.info('send to %s failed !'%self.address)
             except Exception, e:
-                LOG.error('%s broadcast error...'%self.address)
-                if e.args == 9:
-                    LOG.error('%s Socket has be closed! Send package failed : %s'%(self.address, 
-                                                                                   rdata.__len__()))
-                else:
-                    LOG.error('%s : %s'%(format_exc(),
-                                         rdata.__repr__()))
+                LOG.error('%s broadcast error : '%self.address)
+                LOG.error('%s\n%s'%(format_exc(),
+                                    rdata.__repr__()))
                 self.exit()
 
     def chkHeart(self, time):
@@ -120,24 +130,24 @@ class net(object):
             LOG.error('%s heart time out !'%self.address)
             self.exit()
     
-    def reHeart(self, time):
+    def reHeart(self):
         while self.switch:
             package = self.heart.receive()
             LOG.debug('received heart from %s !'%self.address)
-            SLEEP.delay_caller(time)
-            if self.switch:
-                self.broadcast.send(package)
                 
     def exit(self):
         pass
 
 class testManage(net):
     def __init__(self, sock, addr):
-        super(testManage, self).__init__(sock, addr)
+        super(testManage, self).__init__(sock, 
+                                         addr, 
+                                         settings.TestManage.magicCode, 
+                                         settings.TestManage.heartCode)
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
         
         self.task_reHeart = stackless.tasklet(self.reHeart)(10)
-        self.task_chkHeart = stackless.tasklet(self.chkHeart)(60)
+        self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
         CHList[self.address] = self.broadcast
         self.task_receive = stackless.tasklet(self.receive)()
         
@@ -146,21 +156,47 @@ class testManage(net):
         self.uid = None
         self.cltlist = []
         
+        self.file = {}
+        
+    def chkHeart(self, time):
+        while (not self.death) and self.switch:
+            self.death = True
+            SLEEP.delay_caller(time)
+        if self.switch:
+            LOG.error('%s TestManage heart time out !'%self.address)
+            self.exit()
+        
+    def reHeart(self, time):
+        while self.switch:
+            package = self.heart.receive()
+            LOG.debug('received heart from TestManage %s !'%self.address)
+            SLEEP.delay_caller(time)
+            try:
+                self.sock.send(package)
+            except:
+                pass
+        
     def exit(self):
         global CONTROL, CHList
+        self.broadcast.close()
+        self.heart.close()
+        self.net_to_parse.close()
         self.switch = False
+        self.sock.shutdown()
         if self.address in CHList.keys():    #不是CONTROL
             del(CHList[self.address])
             if CONTROL:
                 info = '%s heart time out or disconnect ...'%self.address
                 CONTROL.send(mylib.package.pack2(info))
             self.chkEnd(self.address)
-            if self.uid in CHList.keys() and self.broadcast in CHList[self.uid]:       #client.exe退出时关闭该链接虚拟登录
-                CHList[self.uid].remove(self.broadcast)
-        else:
+        elif self.broadcast == CONTROL:
             CONTROL = None
             self.dispense('exit')
-        LOG.info('%s testManage exit...'%self.address)
+        if self.uid in CHList.keys() and self.broadcast in CHList[self.uid]:       #client.exe退出时关闭该链接虚拟登录
+            CHList[self.uid].remove(self.broadcast)
+            if not CHList[self.uid]:
+                del(CHList[self.uid])
+        LOG.info('%s TestManage exit...'%self.address)
     
     def listen_message(self):
         global CLTLIST, CONTROL, RUN
@@ -168,40 +204,26 @@ class testManage(net):
         pbr = Response()
         while self.switch:
             r_pack = self.net_to_parse.receive()
-            if r_pack[1] != 0xABDE:
-                LOG.info('received head from %s : [%d, %2x]'%(self.address, 
-                                                              r_pack[0], 
-                                                              r_pack[1]))
+            if r_pack[1] in [0x9001,0x9003,0x9004]:   #是用SID不停登陆的,所以需要不显示LOG
+                LOG.debug('received head from TestManage %s : [%d, %2x]'%(self.address, 
+                                                                          r_pack[0], 
+                                                                          r_pack[1]))
             else:
-                LOG.debug('received head from %s : [%d, %2x]'%(self.address, 
-                                                               r_pack[0], 
-                                                               r_pack[1]))
-            LOG.debug('received package from %s : %s'%(self.address,
-                                                       r_pack[2].__len__()))
+                LOG.info('received head from TestManage %s : [%d, %2x]'%(self.address, 
+                                                                         r_pack[0], 
+                                                                         r_pack[1]))
+            LOG.debug('received package from TestManage %s : '%self.address, r_pack[2])
             result = ''
             if r_pack[1] == 0x0001:
                 CONTROL = self.broadcast
-                del(CHList[self.address])
+                if self.address in CHList.keys():
+                    del(CHList[self.address])
                 s_pack = self.getCltList(r_pack)
-                for ip in self.cltlist:
-                    fail = True
-                    for addr in CHList.keys():
-                        if ':' in ip and ip == addr:
-                            CLTLIST.append(ip)
-                            CHList[ip].send('%sip:%s'%(s_pack, self._myIP(ip.split(':')[0])))
-                            LOG.info('send to %s'%ip)
-                            fail = False
-                            break
-                        elif (not ':' in ip) and ip in addr:
-                            CLTLIST.append(addr)
-                            CHList[addr].send('%sip:%s'%(s_pack, self._myIP(ip)))
-                            LOG.info('send to %s'%addr)
-                            fail = False
-                    if fail:
-                        result = '%s connecting failed...\n'%ip
-                        s_pack = mylib.package.pack2(result)
-                        self.broadcast.send(s_pack)
-                if not CLTLIST:
+                if CLTLIST:
+                    for ip in CLTLIST:
+                        CHList[ip].send('%sip:%s'%(s_pack, self._myIP(ip.split(':')[0])))
+                        LOG.info('send to TestManage %s'%ip)
+                else:
                     self.broadcast.send(self.e_pack)
             elif r_pack[1] in [0x0002, 0x0004]:
                 if CONTROL:
@@ -209,80 +231,80 @@ class testManage(net):
             elif r_pack[1] in [0x0003, 0xffff]:
                 self.dispense(r_pack[2])
             elif r_pack[1] == 0x0005:
-                del(CHList[self.address])
-                ips = ''
+                if self.address in CHList.keys():
+                    del(CHList[self.address])
+                ips = []
                 for ip in CHList.keys():
                     if ':' in ip:
                         ch_len = 1
                     else:
                         ch_len = CHList[ip].__len__()
-                    ips = '%s%s %s\n'%(ips, ip, ch_len)
-                LOG.info(ips)
-                result = '%s%s'%(result, ips)
-                s_pack = mylib.package.pack2(result)
-                s_pack = '%s%s'%(s_pack, self.e_pack)
+                    ips += [ip, '\t', str(ch_len), '\n']
+                result = ''.join(ips)
+                LOG.info(result)
+                s_pack = ''.join([mylib.package.pack2(result), self.e_pack])
                 self.broadcast.send(s_pack)
             elif r_pack[1] == 0xff00:
                 self.chkEnd(self.address)
             elif r_pack[1] == 0xf0f0:   #关闭服务器
-                global TASK_APP, TASK_CLT
-                LOG.info('The End ...')
-                s_pack = mylib.package.pack2('The End ...')
-                s_pack = '%s%s'%(s_pack, self.e_pack)
-                self.broadcast.send(s_pack)
-                for t in TASK_APP:
-                    t.kill()
-                for t in TASK_CLT:
-                    t.kill()
-                RUN = False
-                try:
-                    for ch_key in CHList.keys():
-                        if ':' in ch_key:
-                            CHList[ch_key].send('exit')
-                        else:
-                            for uid_ch in CHList[ch_key]:
-                                uid_ch.send('exit')
-                except :
-                    pass
+                pass
 #            模拟登陆
-            elif r_pack[1] == 0xABDE:    #用来借助自动脚本关闭war3进程所必须的登录
+            elif r_pack[1] == 0x9001:    #用来借助自动脚本关闭war3进程所必须的登录
                 msg.ParseFromString(r_pack[2][14:])
-                LOG.debug('receive package from %s : %s'%(self.address,
-                                                          msg))
+                LOG.debug('receive package from TestManage %s : %s'%(self.address,
+                                                                     msg))
                 user = msg.userName
                 if user in LoginInfo.keys():    #virtual login
                     sid = LoginInfo[user]
-                    url = '%s/user.tcplogin/?alt=pbbin&sid=%s&service=msg'%(APPSERVER, 
+                    url = '%s/user.tcplogin/?alt=pbbin&sid=%s&service=msg'%(settings.APPSERVER, 
                                                                             sid)
-                    LOG.info('%s_%s send http request : %s'%(user,
-                                                             self.address, 
-                                                             url))
-                    mdata = urlopen(url).read()
-                    pbr.ParseFromString(mdata)
-                    LOG.info('%s_%s receive http response : %s'%(user, 
-                                                                 self.address, 
-                                                                 pbr))
+                    r_pack[2] = urlopen(url).read()
+                    LOG.info('%s_%s TestManage send http request : %s'%(user,
+                                                                        self.address, 
+                                                                        url))
+                    pbr.ParseFromString(r_pack[2])
+                    LOG.info('%s_%s TestManage receive http response : %s'%(user, 
+                                                                            self.address, 
+                                                                            pbr))
                     if pbr.code == 200000:
                         self.user = user
                         self.uid = str(pbr.userTCPLogin.uid)
                         CHList[self.uid].append(self.broadcast)
-                        LOG.info('%s_%s_%s double logined'%(user, 
-                                                            self.uid, 
-                                                            self.address))
-                        self.broadcast.send(mylib.package.make_response_clt(mdata))
+                        LOG.info('%s_%s_%s TestManage double logined'%(user, 
+                                                                       self.uid, 
+                                                                       self.address))
+                        self.broadcast.send(mylib.package.make_response_clt(r_pack[2]))
                     else:
                         if self.user in LoginInfo.keys():
                             del(LoginInfo[self.user])
-                        LOG.error('%s_%s double logined failed !'%(user, 
-                                                                   self.address))
+                        LOG.error('%s_%s TestManage double logined failed !'%(user, 
+                                                                              self.address))
+#===============================================================================
+# 姚常鋆 C++ Client LOG收集逻辑
+#===============================================================================
+            elif r_pack[1] == 0x1001:
+                filename_len = unpack('<H',r_pack[2][14 : 16])[0]   #log文件名长度
+                filename = r_pack[2][16 : filename_len + 16]
+                if filename in self.file.keys():
+                    self.file[filename].write(r_pack[2][filename_len + 16 : ])   #补充文件
+                else:
+                    chkPath(r'.\gmlog')
+                    self.file[filename] = open(r'.\gmlog\%s'%filename,'wb')
+                    self.file[filename].write(r_pack[2][filename_len + 16 : ])
+            elif r_pack[1] == 0x10ff:
+                filename_len = unpack('<H',r_pack[2][14 : 16])[0]
+                filename = r_pack[2][16 : filename_len + 16]
+                if filename in self.file.keys():
+                    self.file[filename].close()
+                    del(self.file[filename])
+                    self.broadcast.send(mylib.package.packCltEnd())
                 
     def dispense(self, package):
         global CLTLIST
-        result = ''
         for ip in CLTLIST:     #调出0x0001包中所存在的目的地址
             if ip in CHList.keys():     #与正连接的客户端列表进行比较
                 CHList[ip].send(package)
-                LOG.info('send to %s'%ip)
+                LOG.info('send to TestManage %s'%ip)
             else:
                 info = '%s connecting failed ...'%ip
                 LOG.info(info)
@@ -293,31 +315,68 @@ class testManage(net):
         global CLTLIST, CONTROL
         if addr in CLTLIST:     #当客户端列表为空时，可以发送控制端收尾指令
             CLTLIST.remove(addr)
-            if not CLTLIST:
+            if not CLTLIST and CONTROL:
                 CONTROL.send(self.e_pack)
 
     def getCltList(self, r_pack):
-        cltstring_len = int(unpack('<H', r_pack[2][6:8])[0])
+        global CLTLIST, CONTROL
+        cltstring_len = int(unpack('<H', r_pack[2][14:16])[0])
         if cltstring_len == 0xffff:
-            self.cltlist = [ip for ip in CHList.keys() if ':' in ip]   #没有':'则为virtual_message的链接,需要排除
+            CLTLIST = [ip for ip in CHList.keys() if ':' in ip]   #没有':'则为virtual_message的链接,需要排除
             cltstring_len = 0
-        else:
-            cltstring = r_pack[2][8 : 8 + cltstring_len]
+        elif cltstring_len > 0xf000:
+            CLTLIST = [ip for ip in CHList.keys() if ':' in ip]
+            cltstring_len = cltstring_len - 0xf000
+            cltstring = r_pack[2][16 : 16 + cltstring_len]
             for i in range(0, cltstring_len, 6):
                 port = ord(cltstring[i+4]) * 256 + ord(cltstring[i+5])
                 if port:
-                    port = ':%s'%port
+                    ip = '%s.%s.%s.%s:%s'%(ord(cltstring[i]),
+                                           ord(cltstring[i+1]),
+                                           ord(cltstring[i+2]),
+                                           ord(cltstring[i+3]), 
+                                           port)
+                    if ip in CLTLIST:
+                        CLTLIST.remove(ip)
                 else:
-                    port = ''
-                self.cltlist.append('%s.%s.%s.%s%s'%(ord(cltstring[i]),
-                                                     ord(cltstring[i+1]),
-                                                     ord(cltstring[i+2]),
-                                                     ord(cltstring[i+3]),
-                                                     port))
-        m_pack = r_pack[2][8 + cltstring_len : ]
-        s_pack = pack('<LH', 
-                      r_pack[0] - cltstring_len + 16,     #16 = 18 - 2
-                      r_pack[1])
+                    ip = '%s.%s.%s.%s:'%(ord(cltstring[i]),
+                                        ord(cltstring[i+1]),
+                                        ord(cltstring[i+2]),
+                                        ord(cltstring[i+3]))
+                    tempCLTLIST = CLTLIST[:]
+                    for addr in tempCLTLIST:
+                        if ip in addr:
+                            CLTLIST.remove(addr)
+        else:    
+            cltstring = r_pack[2][16 : 16 + cltstring_len]
+            for i in range(0, cltstring_len, 6):
+                port = ord(cltstring[i+4]) * 256 + ord(cltstring[i+5])
+                if port:
+                    ip = '%s.%s.%s.%s:%s'%(ord(cltstring[i]),
+                                           ord(cltstring[i+1]),
+                                           ord(cltstring[i+2]),
+                                           ord(cltstring[i+3]), 
+                                           port)
+                    tempCLTLIST = [addr for addr in CHList.keys() if ip == addr]
+                else:
+                    ip = '%s.%s.%s.%s:'%(ord(cltstring[i]),
+                                        ord(cltstring[i+1]),
+                                        ord(cltstring[i+2]),
+                                        ord(cltstring[i+3]))
+                    tempCLTLIST = [addr for addr in CHList.keys() if ip in addr]
+                if tempCLTLIST:
+                    CLTLIST += tempCLTLIST
+                else:
+                    result = '%s connecting failed...\n'%ip
+                    s_pack = mylib.package.pack2(result)
+                    CONTROL.send(s_pack)
+        m_pack = r_pack[2][16 + cltstring_len : ]
+        s_pack = pack('<HLHHL', 
+                      r_pack[0] - cltstring_len + 16,    #16 = 18(myIP) - 2
+                      0xAAAC, 
+                      r_pack[0] - cltstring_len + 16, 
+                      r_pack[1], 
+                      0)
         s_pack += m_pack
         return s_pack
 
@@ -331,195 +390,223 @@ class testManage(net):
 
 class VirtualMessage_to_Client(net):
     def __init__(self, sock, addr):
-        super(VirtualMessage_to_Client, self).__init__(sock, addr, MAGIC_CLT)
+        super(VirtualMessage_to_Client, self).__init__(sock, 
+                                                       addr, 
+                                                       settings.VirtualMessagetoClient.magicCode, 
+                                                       settings.VirtualMessagetoClient.heartCode)
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
-        self.headformat = '<HL'
-        self.windage = 2
+        
+        self.task_reHeart = stackless.tasklet(self.reHeart)()
+        self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
         self.task_receive = stackless.tasklet(self.receive)()
         
         self.uid = None
         self.sid = None
         self.user = None
-        
+
+    def chkHeart(self, time):
+        while (not self.death) and self.switch:
+            self.death = True
+            SLEEP.delay_caller(time)
+        if self.switch:
+            LOG.error('%s %s_%s GMClient heart time out !'%(self.address, self.user, self.uid))
+            self.exit()
+
+    def reHeart(self):
+        while self.switch:
+            package = self.heart.receive()
+            LOG.debug('%s_%s received heart from GMClient %s !'%(self.user, self.uid, self.address))
+
     def exit(self):
+        self.broadcast.close()
+        self.heart.close()
+        self.net_to_parse.close()
         self.switch = False
+        self.sock.close()
         if self.uid in CHList.keys():
             if self.broadcast in CHList[self.uid]:
                 CHList[self.uid].remove(self.broadcast)
             if len(CHList[self.uid]) <= 1:
                 self.do_logout()
-        LOG.info('%s Client exit...'%self.address)
+        LOG.info('%s GMClient exit...'%self.address)
 
     def listen_message(self):
         while self.switch:
             try:
-                r_pack = self.net_to_parse.receive()
-                mdata = r_pack[2]
-                cmd = unpack("<H", mdata[8 : 10])[0]
-                if cmd != 0x9006:
-                    LOG.info('received head from %s_%s_%s : [%d, %2x]'%(self.user, 
-                                                                        self.uid, 
-                                                                        self.address, 
-                                                                        r_pack[0], 
-                                                                        cmd))
+                r_pack = self.net_to_parse.receive() 
+                if r_pack[1] == 0x9006:
+                    LOG.debug('received head from GMClient %s_%s_%s : [%d, %2x]'%(self.user, 
+                                                                                  self.uid, 
+                                                                                  self.address, 
+                                                                                  r_pack[0], 
+                                                                                  r_pack[1]))
                 else:
-                    LOG.debug('received head from %s_%s_%s : [%d, %2x]'%(self.user, 
-                                                                         self.uid, 
-                                                                         self.address, 
-                                                                         r_pack[0], 
-                                                                         cmd))
-                LOG.debug('received package from %s_%s_%s : %s'%(self.user, 
-                                                                 self.uid, 
-                                                                 self.address, 
-                                                                 mdata.__len__()))
-                if cmd == 0x9001:
+                    LOG.info('received head from GMClient %s_%s_%s : [%d, %2x]'%(self.user, 
+                                                                                 self.uid, 
+                                                                                 self.address, 
+                                                                                 r_pack[0], 
+                                                                                 r_pack[1]))
+                LOG.debug('received package from GMClient %s_%s_%s : '%(self.user, 
+                                                                        self.uid, 
+                                                                        self.address), 
+                          r_pack[2])
+                if r_pack[1] == 0x9001:
                     pbr = Response()
                     msg = SocketLoginMessage()
-                    msg.ParseFromString(mdata[14:])
+                    msg.ParseFromString(r_pack[2][14:])
                     user = msg.userName
-                    LOG.debug('receive login_msg from %s : %s'%(self.address,
-                                                                msg))
+                    LOG.debug('receive login_msg from GMClient %s : %s'%(self.address,
+                                                                         msg))
                     if msg.code == 1:
                         if user in LoginInfo.keys():    #virtual login
                             sid = LoginInfo[user]
-                            url = '%s/user.tcplogin/?alt=pbbin&sid=%s&service=msg'%(APPSERVER, 
+                            url = '%s/user.tcplogin/?alt=pbbin&sid=%s&service=msg'%(settings.APPSERVER, 
                                                                                     sid)
-                            LOG.info('%s_%s send http request : %s'%(user,
-                                                                     self.address, 
-                                                                     url))
-                            mdata = urlopen(url).read()
-                            pbr.ParseFromString(mdata)
-                            LOG.info('%s_%s receive http response : %s'%(user, 
-                                                                         self.address, 
-                                                                         pbr))
+                            r_pack[2] = urlopen(url).read()
+                            LOG.info('%s_%s GMClient send http request : %s'%(user,
+                                                                              self.address, 
+                                                                              url))
+                            pbr.ParseFromString(r_pack[2])
+                            LOG.info('%s_%s GMClient receive http response : %s'%(user, 
+                                                                                  self.address, 
+                                                                                  pbr))
                             if pbr.code == 200000:
                                 self.user = user
                                 self.uid = str(pbr.userTCPLogin.uid)
                                 CHList[self.uid].append(self.broadcast)
-                                LOG.info('%s_%s_%s double logined ...'%(self.user, 
-                                                                        self.uid, 
-                                                                        self.address))
+                                LOG.info('%s_%s_%s GMClient double logined ...'%(self.user, 
+                                                                                 self.uid, 
+                                                                                 self.address))
                             else:
                                 #此时sid已经过期用sid登出是没有意义的
                                 del(LoginInfo[user])
-                                LOG.error('%s_%s double logined failed !'%(user, 
-                                                                           self.address))
+                                LOG.error('%s_%s GMClient double logined failed !'%(user, 
+                                                                                    self.address))
                         else:
-                            url = '%s/user.tcplogin/?alt=pbbin&username=%s&password=%s&service=msg'%(APPSERVER, 
+                            url = '%s/user.tcplogin/?alt=pbbin&username=%s&password=%s&service=msg'%(settings.APPSERVER, 
                                                                                                      user, 
                                                                                                      msg.password)
-                            LOG.info('%s_%s send http request: %s'%(user, 
-                                                                    self.address, 
-                                                                    url))
-                            mdata = urlopen(url).read()
-                            pbr.ParseFromString(mdata)
-                            LOG.info('%s_%s receive http response: %s'%(user, 
-                                                                        self.address, 
-                                                                        pbr))
+                            r_pack[2] = urlopen(url).read()
+                            LOG.info('%s_%s GMClient send http request: %s'%(user, 
+                                                                             self.address, 
+                                                                             url))
+                            pbr.ParseFromString(r_pack[2])
+                            LOG.info('%s_%s GMClient receive http response: %s'%(user, 
+                                                                                 self.address, 
+                                                                                 pbr))
                             if pbr.code == 200000:
                                 self.user = user
                                 self.uid = str(pbr.userTCPLogin.uid)
                                 self.sid = pbr.userTCPLogin.sid
                                 CHList[self.uid] = [self.broadcast]
                                 LoginInfo[user] = self.sid
-                                LOG.info('%s_%s_%s logined ...'%(self.user, 
-                                                                 self.uid, 
-                                                                 self.address))
+                                LOG.info('%s_%s_%s GMClient logined ...'%(self.user, 
+                                                                          self.uid, 
+                                                                          self.address))
                             else:
-                                LOG.error('%s_%s_%s login failed : %s'%(self.user, 
-                                                                        self.uid, 
-                                                                        self.address, 
-                                                                        pbr))
-                        self.broadcast.send(mylib.package.make_response_clt(mdata))
+                                LOG.error('%s_%s_%s GMClient login failed : %s'%(self.user, 
+                                                                                 self.uid, 
+                                                                                 self.address, 
+                                                                                 pbr))
+                        self.broadcast.send(mylib.package.make_response_clt(r_pack[2]))
                     elif msg.code == 3:
                         self.do_logout()
-                elif cmd == 0x9006:  #return 0x9008 heart for flash
-                    LOG.debug('receive heart from %s_%s_%s ...'%(self.user, 
-                                                                 self.uid, 
-                                                                 self.address))
                 else:
-                    LOG.warning('unknow package from %s_%s_%s : %x'%(self.user, 
-                                                                     self.uid, 
-                                                                     self.address, 
-                                                                     cmd))
+                    LOG.warning('unknow package from GMClient %s_%s_%s : %x'%(self.user, 
+                                                                              self.uid, 
+                                                                              self.address, 
+                                                                              r_pack[1]))
             except :
-                LOG.error('listen message error from %s_%s_%s : %x, %s'%(self.user, 
-                                                                         self.uid, 
-                                                                         self.address, 
-                                                                         cmd, 
-                                                                         r_pack.__repr__()))
+                LOG.error('listen message error from GMClient %s_%s_%s : %x, %s'%(self.user, 
+                                                                                  self.uid, 
+                                                                                  self.address, 
+                                                                                  r_pack[1], 
+                                                                                  r_pack.__repr__()))
                 LOG.error(format_exc())
 
     def do_logout(self):
         if self.uid in CHList.keys() and self.user in LoginInfo.keys():
-            pbr = Response()
-            url = '%s/user.tcplogout/?alt=pbbin&sid=%s&service=msg'%(APPSERVER,
-                                                                     self.sid)
-            mdata = urlopen(url).read()
-            LOG.info('%s_%s_%s send http request: %s'%(self.user, 
-                                                       self.uid, 
-                                                       self.address, 
-                                                       url))
-            pbr.ParseFromString(mdata)
-            LOG.info('%s_%s_%s receive http response: %s'%(self.user, 
-                                                           self.uid, 
-                                                           self.address, 
-                                                           pbr))
-            for ch in CHList[self.uid]:
-                ch.send(mylib.package.make_response_clt(mdata))
-            if pbr.code == 200000:
-                del(LoginInfo[self.user])
-                del(CHList[self.uid])
-                self.switch = False
-                LOG.info('%s_%s_%s logouted...'%(self.user, 
-                                                 self.uid, 
-                                                 self.address))
-            else:
-                LOG.error('%s_%s_%s logout failed : %s'%(self.user, 
-                                                         self.uid, 
-                                                         self.address, 
-                                                         pbr))
+            while True:
+                pbr = Response()
+                url = '%s/user.tcplogout/?alt=pbbin&sid=%s&service=msg'%(settings.APPSERVER,
+                                                                         self.sid)
+                mdata = urlopen(url).read()
+                LOG.info('%s_%s_%s GMClient send http request: %s'%(self.user, 
+                                                                    self.uid, 
+                                                                    self.address, 
+                                                                    url))
+                pbr.ParseFromString(mdata)
+                LOG.info('%s_%s_%s GMClient receive http response: %s'%(self.user, 
+                                                                        self.uid, 
+                                                                        self.address, 
+                                                                        pbr))
+                if pbr.code == 200000:
+                    del(LoginInfo[self.user])
+                    LOG.info('%s_%s_%s GMClient logouted...'%(self.user, 
+                                                              self.uid, 
+                                                              self.address))
+                    self.user = None
+                    for ch in CHList[self.uid]:
+                        ch.send(mylib.package.make_response_clt(mdata))
+                        CHList[self.uid].remove(ch)
+                    if len(CHList[self.uid]) <= 1:
+                        del(CHList[self.uid])
+                    break
+                else:
+                    LOG.error('%s_%s_%s GMClient logout failed : %s'%(self.user, 
+                                                                      self.uid, 
+                                                                      self.address, 
+                                                                      pbr))
+                    for ch in CHList[self.uid]:
+                        ch.send(mylib.package.make_response_clt(mdata))
+                    SLEEP.delay_caller(5)
+                        
 
 class VirtualMessage_to_Service(net):
     def __init__(self, sock, addr):
-        super(VirtualMessage_to_Service, self).__init__(sock, addr, MAGIC_SRV)
+        super(VirtualMessage_to_Service, self).__init__(sock, 
+                                                        addr, 
+                                                        settings.VirtualMessagetoService.magicCode, 
+                                                        settings.VirtualMessagetoService.heartCode)
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
-        self.headformat = '<HL'
-        self.windage = 2
         self.task_receive = stackless.tasklet(self.receive)()
         self.package = None
         
     def exit(self):
+        self.broadcast.close()
+        self.heart.close()
+        self.net_to_parse.close()
         self.switch = False
         LOG.info('%s APP Service exit...'%self.address)
 
     def listen_message(self):
+        msg = Msg()
         while self.switch:
             try:
                 r_pack = self.net_to_parse.receive()  #r_pack[0] 包长度, r_pack[1]magic_code, r_pack[2]收到的完成数据包
-                LOG.debug('received package from APP Service %s : %s'%(self.address, 
-                                                                       r_pack[2].__len__()))
-                mdata = r_pack[2]
-                cmd = unpack("<H", mdata[8 : 10])[0]
+                LOG.debug('received package from APP Service %s : '%self.address, 
+                          r_pack[2])
                 LOG.info('APP Service %s code: %x'%(self.address, 
-                                                    cmd))
-                if cmd == 0x7001:
-                    receivers_list = self.getReceivers(mdata)
+                                                    r_pack[1]))
+                if r_pack[1] == 0x7001:
+                    receivers_list = self.getReceivers(r_pack[2])
+                    self.broadcast.send(mylib.package.make_response_app(0))
+                    msg.ParseFromString(self.package)
                     for receiver in receivers_list:
                         if str(receiver) in CHList.keys():
+                            LOG.info('APP Service %s transmit to receiver %s : '%(self.address,
+                                                                                  receiver), 
+                                     self.package)
                             s_string = mylib.package.make_transmit(self.package)
                             for ch in CHList[str(receiver)]:
-                                LOG.info('APP Service %s transmit to receiver %s : %s'%(self.address,
-                                                                                        receiver, 
-                                                                                        self.package.__len__()))
-                                ch.send(s_string)
-                    self.broadcast.send(mylib.package.make_response_app(0))
+                                ch.send([s_string,msg.uuid])
+                            
                 else:
                     LOG.warning('unknow code from APP Service %s : %x'%(self.address, 
-                                                                        cmd))
+                                                                        r_pack[1]))
             except :
                 LOG.error('listen message error from APP Service %s : %x, %s'%(self.address,
-                                                                               cmd, 
+                                                                               r_pack[1], 
                                                                                r_pack.__repr__()))
                 LOG.error(format_exc())
 
@@ -534,8 +621,8 @@ def TestThread():
     global RUN, TASK_TEST
     LOG.info('testmanage runing...')
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(('',TEST_PORT))
-    sock.listen(1)
+    sock.bind(('', settings.TestManage.port))
+    sock.listen(5)
     while RUN:
         sockclient,addr = sock.accept()
         LOG.info('%s:%s TestManage connected...'%addr)
@@ -546,8 +633,8 @@ def TestThread():
 def CltThread():
     global RUN, TASK_CLT 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(('',CLT_PORT))
-    sock.listen(1)
+    sock.bind(('', settings.VirtualMessagetoClient.port))
+    sock.listen(5)
     while RUN:
         sockclient, addr = sock.accept()
         LOG.info('%s:%s Clt connected...'%addr)
@@ -558,7 +645,7 @@ def CltThread():
 def APPThread():
     global RUN, TASK_APP
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(('',APP_PORT))
+    sock.bind(('', settings.VirtualMessagetoService.port))
     sock.listen(1)
     while RUN:
         sockclient, addr = sock.accept()
@@ -572,7 +659,7 @@ if __name__ == '__main__':
     system('title VirtualMessage Service')
     roachlib.stacklesssocket.install()
     import socket
-    if VirtualMessage:
+    if settings.VirtualMessage:
         LOG.info('virtualmessage runing...')
         TASK_APP.append(stackless.tasklet(APPThread)())
         TASK_CLT.append(stackless.tasklet(CltThread)())

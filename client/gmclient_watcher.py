@@ -7,7 +7,7 @@ import socket
 import traceback
 from time import sleep
 
-from mylib import log
+from mylib.log import LOG
 
 class GMClient(object):
     def __init__(self, sock):
@@ -39,9 +39,10 @@ class GMClient(object):
                     elif package[4] == '2':
                         self.gamestatus = 0
                 elif head[0] == 0x21332621 and package[3] == 0x4095:    #游戏进程关闭消息
-                    if self.gamestatus > 0 and self.gamestatus < 4:
-                        log._get_screen()
+                    if self.gamestatus < 4:
+                        self.gamestatus = 0
                         log.LOG.error("Oh No! Play game failed!")
+                os.environ['GAMESTATUS']=str(self.gamestatus)
                 data = self.parseHead(data)
         return data        
 
@@ -55,7 +56,7 @@ if __name__ == '__main__':
             GM.receive()
         except Exception, e:
             if str(e) == "(10056, 'Socket is already connected')":
-                log.LOG.info('GMClient connecting ...')
+                LOG.info('GMClient connecting ...')
             else:
-                log.LOG.error('GMClient : %s'%traceback.format_exc())
+                LOG.error('GMClient : %s'%traceback.format_exc())
         sleep(30)

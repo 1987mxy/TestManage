@@ -1,4 +1,5 @@
-# -*- encoding: utf-8 -*-
+#coding=gbk
+
 import logging
 from sys import stdout
 from os import path,mkdir
@@ -6,10 +7,76 @@ from win32gui import GetWindowDC
 from win32ui import CreateDCFromHandle, CreateBitmap
 from win32api import EnumDisplayMonitors
 from win32con import SRCCOPY
+from mylib.config import CONF
 
 import mylib.settings
 LOG = None
 
+class mylog(object):
+    def __init__(self, logger):
+        self.logger = logger
+        mylib.settings.Status = CONF.getStatus()
+    
+    def critical(self, string, argument = None):   #high
+        if  mylib.settings.Status == 'release':
+            if argument:
+                self.logger.critical('%s%s'%(string, argument.__len__()))
+            else:
+                self.logger.critical(string)
+        elif  mylib.settings.Status == 'debug':
+            if argument:
+                self.logger.critical('%s%s'%(string, argument.__repr__()))
+            else:
+                self.logger.critical(string)
+    
+    def error(self, string, argument = None):
+        if mylib.settings.Status == 'release':
+            if argument:
+                self.logger.error('%s%s'%(string, argument.__len__()))
+            else:
+                self.logger.error(string)
+        elif mylib.settings.Status == 'debug':
+            if argument:
+                self.logger.error('%s%s'%(string, argument.__repr__()))
+            else:
+                self.logger.error(string)
+
+    def warning(self, string, argument = None):
+        if mylib.settings.Status == 'release':
+            if argument:
+                self.logger.warning('%s%s'%(string, argument.__len__()))
+            else:
+                self.logger.warning(string)
+        elif mylib.settings.Status == 'debug':
+            if argument:
+                self.logger.warning('%s%s'%(string, argument.__repr__()))
+            else:
+                self.logger.warning(string)
+
+    def info(self, string, argument = None):
+        if mylib.settings.Status == 'release':
+            if argument:
+                self.logger.info('%s%s'%(string, argument.__len__()))
+            else:
+                self.logger.info(string)
+        elif mylib.settings.Status == 'debug':
+            if argument:
+                self.logger.info('%s%s'%(string, argument.__repr__()))
+            else:
+                self.logger.info(string)
+    
+    def debug(self, string, argument = None):  #low
+        if mylib.settings.Status == 'release':
+            if argument:
+                self.logger.debug('%s%s'%(string, argument.__len__()))
+            else:
+                self.logger.debug(string)
+        elif mylib.settings.Status == 'debug':
+            if argument:
+                self.logger.debug('%s%s'%(string, argument.__repr__()))
+            else:
+                self.logger.debug(string)
+                
 def _pathrule(logtype, filetype = 'log'):
     from time import strftime,localtime
     time = strftime('%Y-%m-%d %H_%M_%S',localtime())
@@ -17,7 +84,7 @@ def _pathrule(logtype, filetype = 'log'):
         mkdir("log")
     return r'./log/%s_%s.%s'%(time, logtype, filetype)
     
-def _get_screen():
+def get_screen():
     hwnd = 0
     hwndDC = GetWindowDC(hwnd)
     mfcDC = CreateDCFromHandle(hwndDC)
@@ -52,23 +119,25 @@ def run_log():
     logfile.setLevel(logging.ERROR)
     logfile.setFormatter(fmt)
     rlog.addHandler(logfile)
-    return rlog
+    myrlog = mylog(rlog)
+    return myrlog
 
-#===============================================================================鎬ц兘鎸囨暟鏆傛椂涓嶇敤
+#===============================================================================暂不统计性能指数
 # def performance_log():
-#    plog = logging.getLogger('performancelog')
-#    plog.setLevel(logging.INFO)
+#    plog = mylog.getLogger('performancelog')
+#    logging.setLevel(mylog.INFO)
 #    lpath = _pathrule('performance')
-#    logfile = logging.FileHandler(lpath, "w")
-#    logfile.setLevel(logging.INFO)
-#    fmt = logging.Formatter("%(message)s")
+#    logfile = mylog.FileHandler(lpath, "w")
+#    logfile.setLevel(mylog.INFO)
+#    fmt = mylog.Formatter("%(message)s")
 #    logfile.setFormatter(fmt)
-#    plog.addHandler(logfile)
+#    logging.addHandler(logfile)
 #    if settings.PRINT_PERFORMANCELOG and settings.PRINT_LOG:
-#        display = logging.StreamHandler(stdout)
-#        display.setLevel(logging.INFO)
-#        plog.addHandler(display)  #print to scree
-#    return plog
+#        display = mylog.StreamHandler(stdout)
+#        display.setLevel(mylog.INFO)
+#        logging.addHandler(display)  #print to scree
+#    myplog = mylog(plog)
+#    return myplog
 #===============================================================================
 
 LOG = run_log()

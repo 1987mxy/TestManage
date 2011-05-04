@@ -8,6 +8,9 @@ class myConfig(object):
     def __init__(self):
         self.conf = ConfigParser()
         self.conf.read('config.ini')
+        
+    def getStatus(self):
+        return self.conf.get('service', 'status')
     
     def getPort(self):
         return int(self.conf.get('service', 'port'))
