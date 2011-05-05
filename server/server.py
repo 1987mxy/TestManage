@@ -47,7 +47,7 @@ class MyStacklessChannel(stackless.channel):
         return ''
 
 class net(object):
-    def __init__(self, sock, addr, magic, heart):
+    def __init__(self, sock, addr, magicCode, heartCode):
         if self.__class__ is net:
             LOG.error('net class dose not instantiation')
             raise 'net class dose not instantiation'
@@ -55,10 +55,9 @@ class net(object):
         self.sock = sock
         self.switch = True
         self.death = False
-        self.magicCode = magic
-        self.heartCode = heart
+        self.magicCode = magicCode
+        self.heartCode = heartCode
         self.headformat = '<HLHHL'
-        self.heart = MyStacklessChannel()
         self.broadcast = MyStacklessChannel()
         self.net_to_parse = MyStacklessChannel()
     
@@ -83,16 +82,13 @@ class net(object):
             self.exit()
 
     def parseHead(self, data):
-        authentic = False
         if len(data) >= 14:
             head = unpack(self.headformat, data[:14])
             if head[0] + 2 <= len(data):
                 mdata = data[ : head[0] + 2]
                 data = data[head[0] + 2 : ]
                 if head[1] == self.magicCode:
-                    if head[3] == self.heartCode:
-                        self.heart.send(mdata)
-                    else:
+                    if head[3] != self.heartCode:
                         self.net_to_parse.send([head[0], head[3], mdata])
                 else:
                     LOG.error('receive FIFA package from %s : '%self.address, mdata)
@@ -116,7 +112,7 @@ class net(object):
                         LOG.debug('send to %s : '%self.address, rdata)
                 else:
                     LOG.info('send to %s failed !'%self.address)
-            except Exception, e:
+            except Exception:
                 LOG.error('%s broadcast error : '%self.address)
                 LOG.error('%s\n%s'%(format_exc(),
                                     rdata.__repr__()))
@@ -131,9 +127,7 @@ class net(object):
             self.exit()
     
     def reHeart(self):
-        while self.switch:
-            package = self.heart.receive()
-            LOG.debug('received heart from %s !'%self.address)
+        pass
                 
     def exit(self):
         pass
@@ -156,6 +150,7 @@ class testManage(net):
         self.uid = None
         self.cltlist = []
         
+        
         self.file = {}
         
     def chkHeart(self, time):
@@ -167,12 +162,12 @@ class testManage(net):
             self.exit()
         
     def reHeart(self, time):
+        h_pack = mylib.package.pack6()
         while self.switch:
-            package = self.heart.receive()
-            LOG.debug('received heart from TestManage %s !'%self.address)
+            LOG.debug('send heart to TestManage %s !'%self.address)
             SLEEP.delay_caller(time)
             try:
-                self.sock.send(package)
+                self.sock.sendall(h_pack)
             except:
                 pass
         
@@ -182,7 +177,8 @@ class testManage(net):
         self.heart.close()
         self.net_to_parse.close()
         self.switch = False
-        self.sock.shutdown()
+        self.sock.shutdown(socket.SHUT_RDWR)
+        self.sock.close()
         if self.address in CHList.keys():    #²»ÊÇCONTROL
             del(CHList[self.address])
             if CONTROL:
@@ -396,7 +392,6 @@ class VirtualMessage_to_Client(net):
                                                        settings.VirtualMessagetoClient.heartCode)
         self.task_broadcast = stackless.tasklet(self.threadBroadcast)()
         
-        self.task_reHeart = stackless.tasklet(self.reHeart)()
         self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
         self.task_receive = stackless.tasklet(self.receive)()
         
@@ -412,16 +407,12 @@ class VirtualMessage_to_Client(net):
             LOG.error('%s %s_%s GMClient heart time out !'%(self.address, self.user, self.uid))
             self.exit()
 
-    def reHeart(self):
-        while self.switch:
-            package = self.heart.receive()
-            LOG.debug('%s_%s received heart from GMClient %s !'%(self.user, self.uid, self.address))
-
     def exit(self):
         self.broadcast.close()
         self.heart.close()
         self.net_to_parse.close()
         self.switch = False
+        self.sock.shutdown(socket.SHUT_RDWR)
         self.sock.close()
         if self.uid in CHList.keys():
             if self.broadcast in CHList[self.uid]:
@@ -628,6 +619,7 @@ def TestThread():
         LOG.info('%s:%s TestManage connected...'%addr)
         test = testManage(sockclient, addr)
         TASK_TEST.append(stackless.tasklet(test.listen_message)())
+    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
 
 def CltThread():
@@ -640,6 +632,7 @@ def CltThread():
         LOG.info('%s:%s Clt connected...'%addr)
         clt = VirtualMessage_to_Client(sockclient, addr)
         TASK_CLT.append(stackless.tasklet(clt.listen_message)())
+    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
         
 def APPThread():
@@ -652,6 +645,7 @@ def APPThread():
         LOG.info('%s:%s APP service connected...'%addr)
         srv = VirtualMessage_to_Service(sockclient, addr)
         TASK_APP.append(stackless.tasklet(srv.listen_message)())
+    sock.shutdown(socket.SHUT_RDWR)
     sock.close()
 
 if __name__ == '__main__':

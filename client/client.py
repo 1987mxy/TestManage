@@ -8,7 +8,6 @@ from traceback import format_exc
 from win32file import GetLogicalDrives
 from time import sleep
 from struct import unpack, pack
-from _winreg import *
 
 from mylib.log import LOG, get_screen
 from mylib.other import runCMD, chkPath
@@ -24,6 +23,7 @@ PORT = None
 GMPORT = None
 USER = None
 PASSWD = None
+HEARTTIMEOUT = 60
 
 def _getIP():
     inf = os.popen('ipconfig')
@@ -34,7 +34,7 @@ def _getIP():
             return lineinf[0]
 
 def _findPath(flag):
-    global PATH, CONF
+    global PATH
     LOG.info('sreach file ...')
     r = GetLogicalDrives()
     for d in range(2, 27):
@@ -69,6 +69,7 @@ class ManageClient(object):
         self.socket = sock
         
         self.login = False
+        
         self.e_pack = mylib.package.packCtrlEnd()
         self.msg = Msg()
         self.reset()
@@ -76,14 +77,20 @@ class ManageClient(object):
         self.receive()
 
     def send(self):
+        self.socket.settimeout(0)
         self.socket.sendall(self.s_pack)
         LOG.debug('send to Service : ', self.s_pack)
+        LOG.info('='*30)
+        self.socket.settimeout(HEARTTIMEOUT)
+        self.reset()
     
     def close(self):
         self.switch = False
-        self.socket.shutdown()
+        self.socket.shutdown(socket.SHUT_RDWR)
+        self.socket.close()
     
     def reset(self):
+        self.compress = False
         self.file = None
         self.search = ''
         self.s_pack = []
@@ -91,10 +98,6 @@ class ManageClient(object):
         self.localpath = ''
         self.result = []
         self.switch = True
-        
-    def reconnect(self):
-        
-        pass
     
     def receive(self):
         pdata = ''
@@ -141,14 +144,15 @@ class ManageClient(object):
                                                                            head[3]))
                         LOG.debug('received package from Service : ', mdata)
                         self.listen_message()
-                        self.send()
+                        if not self.compress:
+                            self.send()
                         if self.search:
                             PATH[self.search] = _findPath(self.search)
-                        LOG.info('='*30)
-                        self.reset()
                         data = ''
                     elif head[3] == 0x0006:
                         self.socket.send(mdata)
+                        if self.compress:
+                            self.chkCompress()
                         if not self.login:
                             self.chkGMClient()
                         LOG.debug('received heart!')
@@ -200,7 +204,8 @@ class ManageClient(object):
                     if not data['localpath'] in PATH.keys():
                         PATH[data['localpath']] = ''
                     self.operation(data)
-        self.s_pack = ''.join(self.s_pack + [mylib.package.pack2(''.join(self.result)), self.e_pack])
+        if not self.compress:
+            self.s_pack = ''.join(self.s_pack + [mylib.package.pack2(''.join(self.result)), self.e_pack])
 
     #================解析数据报=================
     def readString(self, data):
@@ -222,15 +227,14 @@ class ManageClient(object):
                         if f:
                             fs += _manageChar(self.localpath, f)
                     if fs:
-                        self.socket.settimeout(0)
-                        r = mylib.package.pack4(self.fip, self.localpath, fs)
-                        self.socket.settimeout(60)
-                        self.result.append(r[0])
-                        self.s_pack.append(r[1])
+                        self.compress = True
+                        r = mylib.package.pack4_compression(self.fip, self.localpath, fs)
+                        self.result.append(r)
                     continue
                 #================上传Log=================
                 #================下载文件=================
                 elif step == 'down':
+                    self.compress = True
                     chkPath('%shistory' % self.localpath)
                     for flag in re.split('\|', data['down']):
                         tcmd = '%shistory\\%s' % (self.localpath, flag)
@@ -239,14 +243,15 @@ class ManageClient(object):
                         runCMD('ren "%s(3)" "%s(4)"' % (tcmd, flag))
                         runCMD('ren "%s(2)" "%s(3)"' % (tcmd, flag))
                         runCMD('ren "%s(1)" "%s(2)"' % (tcmd, flag))
-                        runCMD('copy /y "%s" "%s(1)"' % (self.localpath + flag, tcmd))
+                        runCMD('copy /y "%s%s" "%s(1)"' % (self.localpath, flag, tcmd))
+                        runCMD('del /q /f "%s%s"' % self.localpath, flag)
                         LOG.info('成功下载文件%s' % flag)
                         self.result += ['成功下载文件', flag, '\n']
-                    self.socket.settimeout(0)
                     LOG.debug(mylib.rar.decompression('down', self.localpath)) #解压文件
-                    self.socket.settimeout(60)
+                    self.recvPackandchkDecompress(self.localpath, data['down'])
                     LOG.info('成功解压到%s' % self.localpath)
                     self.result += ['成功解压到', self.localpath, '\n']
+                    continue
                 #================下载文件================= 
                 for flag in re.split('\|', data[step]):
                     #================杀进程=================
@@ -280,7 +285,7 @@ class ManageClient(object):
                     elif step == 'update':
                         chkPath(r'.\update')
                         os.popen(r'del /q /f .\update\*.*')
-                        LOG.debug(mylib.rar.decompression('down', '.\\update\\')) #解压update文件
+                        LOG.debug(mylib.rar.decompression('down', '.\\update\\', False)) #解压update文件
                         fileUpdate = open('update.bat', 'w')
                         cmds = r'''
                                 taskkill /f /im client.exe
@@ -307,6 +312,43 @@ class ManageClient(object):
             self.result = ''.join([self.fip, ' error : ', format_exc(), '\n', self.localpath, '\n'] + self.result)
             LOG.error(self.result)
             
+    def chkCompress(self):
+        if os.path.exists(r'.\temp\up.rar'):
+            result, package = mylib.package.pack4_upload(self.fip)
+            self.result.append(result)
+            self.s_pack.append(package)
+            self.s_pack = ''.join(self.s_pack + [mylib.package.pack2(''.join(self.result)), self.e_pack])
+            self.send()
+            
+    def recvPackandchkDecompress(self, decoPath, decoFiles):
+        rdata = ''
+        switch = True
+        while switch:
+            rdata = '%s%s'%(rdata, self.socket.recv(4096))
+            LOG.debug('receive raw_string from Service : ', rdata)
+            if not rdata:
+                LOG.error('disconnect...')
+                self.close()
+                break
+            while True:
+                if len(rdata) >= 14:
+                    head = unpack('<HLHHL', rdata[:14])
+                    if head[0] + 2 <= len(rdata):
+                        mdata = rdata[ : head[0] + 2]
+                        rdata = rdata[head[0] + 2 : ]
+                        if head[1] == 0xAAAC and head[3] == 0x0006:
+                            self.socket.send(mdata)
+                            flag = True
+                            for fileName in re.split('\|', decoFiles):
+                                if not os.path.exists('%s%s'%(decoPath, fileName)):
+                                    flag = False
+                                    break
+                            if flag:
+                                os.popen(r'del /q /f ".\temp\*.rar"')
+                                switch = False
+                                break
+                            LOG.debug('received heart!')
+                break
 
     def chkGMClient(self):
         global GMPORT
@@ -349,7 +391,7 @@ if __name__ == '__main__':
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((SERVER, PORT))
             LOG.info('connecting ...')
-            sock.settimeout(60)
+            sock.settimeout(HEARTTIMEOUT)
             ManageClient(sock)
         except:
             os.system('taskkill /f /im gmclient_watcher.exe')

@@ -90,3 +90,10 @@ optimize splice 0x0003 and 0x0004 package method
 =========================================
 5-4
 change asynchronism method socket.close() to synchronization method socket.shutdown()
+=========================================
+5-5
+change compression method to asynchronism
+add decompression argument for control the method is asynchronism or synchronization
+use a bad method that insert receive loop for support asynchronism decompression after client call decompression
+syncopate mylib.package.pack3 method to pack3_compression and pack3_upload
+syncopate mylib.package.pack4 method to pack4_compression and pack4_upload

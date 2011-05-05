@@ -4,9 +4,9 @@ import sys
 sys.path.append('..\\lib')
 
 import socket
-from os import system
+from os import system,path
 from traceback import format_exc
-from struct import unpack, pack
+from struct import unpack
 from re import sub, split
 from datetime import datetime
 
@@ -19,18 +19,24 @@ from mylib.log import LOG
 PATH = {}
 TIME = None
 OTHER = ''
+HEARTTIMEOUT = 60
 
 def _getFTime():
     time = str(datetime.now())
     time = sub(':', '_', time)
     return time
 
-class NetOperation(object):
-    def __init__(self, packages):
-        global SERVER, PORT
+#class NetOperation(object):
+class MainOperation(object):
+    def __init__(self):
+        global SERVER, PATH, PORT
+        self.compress = False
+        self.s_pack = []
+        self.e_pack = mylib.package.packCltEnd()
+        self.w_pack = mylib.package.pack5()
+        
         self.pdata = ''
         self.r_pack = []
-        self.s_pack = packages
         self.other = None
         self.switch = True
         self.socket = None
@@ -39,16 +45,21 @@ class NetOperation(object):
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((SERVER, PORT))
-        self.socket.settimeout(30)
+        self.socket.settimeout(HEARTTIMEOUT)
         self.socket.sendall(mylib.package.pack6())   #第一个心跳包
         
     def close(self):
         self.switch = False
-        self.socket.shutdown()
+        self.socket.shutdown(socket.SHUT_RDWR)
+        self.socket.close()
         
     def send(self):
+        self.socket.settimeout(0)
+        self.s_pack.append(self.e_pack)
+        self.s_pack = ''.join(self.s_pack)
         self.socket.sendall(self.s_pack)
         LOG.debug('send to Serivce : ', self.s_pack)
+        self.socket.settimeout(HEARTTIMEOUT)
         
     def receive(self):
         while self.switch:
@@ -72,6 +83,8 @@ class NetOperation(object):
                         LOG.info('%s receive data done!\n'%SERVER)
                     elif head[3] == 0x0006:
                         self.socket.sendall(mdata)
+                        if self.compress:
+                            self.chkCompress()
                         LOG.debug('received heart!')
                     else:
                         self.r_pack.append([head[0], head[3], mdata])
@@ -108,15 +121,16 @@ class NetOperation(object):
         for filename in self.file.keys():
             self.file[filename].close()
             chkPath(PATH['logpath'])
-            LOG.debug(mylib.rar.decompression(filename, PATH['logpath'])) #解压log,此时socket已经断开不需要settimeout
+            LOG.debug(mylib.rar.decompression(filename, PATH['logpath'], False)) #解压log,此时socket已经断开不需要settimeout
             LOG.info('解压%s到%s\n'%(filename, PATH['logpath']))
             
-class MainOperation(object):
-    def __init__(self):
-        global SERVER,PATH
-        self.s_pack = []
-        self.e_pack = mylib.package.packCltEnd()
-        self.w_pack = mylib.package.pack5()
+#class MainOperation(object):
+#    def __init__(self):
+#        global SERVER,PATH
+#        self.compress = False
+#        self.s_pack = []
+#        self.e_pack = mylib.package.packCltEnd()
+#        self.w_pack = mylib.package.pack5()
 
     def operation(self, cmdline):
         global OTHER
@@ -135,27 +149,26 @@ class MainOperation(object):
             dtldata['logpath'] = ''.join([dtldata['logpath'], TIME, '_', cmds[1], '\\'])
             OTHER = 'up'
         if 'down' in step:   #step中没有down就不会产生文件包
+            self.compress = True
             files = dtldata['down'].split('|')
-            self.s_pack.append(mylib.package.pack3(PATH['filepath'], files))
-        if 'update' in step:
-            self.s_pack.append(self.s_pack, mylib.package.pack3('%supdate\\'%PATH['filepath'], ['*.*']))
+            mylib.package.pack3_compression(PATH['filepath'], files)
+        elif 'update' in step:
+            self.compress = True
+            self.s_pack, mylib.package.pack3_compression('%supdate\\'%PATH['filepath'], ['*.*'])
             OTHER = 'update'
-        
-        self.s_pack.append(self.e_pack)
-        self.s_pack = ''.join(self.s_pack)
         try:
-            t = NetOperation(self.s_pack)
-            t.connect()
-            t.send()
-            t.socket.settimeout(60)
-            t.receive()
-            t.listen_message()
+            self.connect()
+            self.socket.settimeout(HEARTTIMEOUT)
+            if not self.compress:
+                self.send()
+            self.receive()
+            self.listen_message()
         except Exception, e:
             if e.message == 'timed out':
                 LOG.error('%s : time out!'%SERVER)
             else:
                 LOG.error('%s : %s\n'%(SERVER, format_exc()))
-            t.close()
+            self.close()
         if OTHER == 'up':
             system('explorer "%s"'%PATH['logpath'])
 
@@ -191,6 +204,13 @@ class MainOperation(object):
             
             cltlist_string = ''.join([chr(cltlist_string_len % 256), chr(cltlist_string_len / 256)] + cltlist_string)
         return cltlist_string
+    
+    def chkCompress(self):
+        if path.exists(r'.\temp\down.rar'):
+            package = mylib.package.pack3_upload()
+            self.s_pack.append(package)
+            self.send()
+            self.compress=False
 
 if __name__ == '__main__':
     TIME = _getFTime()

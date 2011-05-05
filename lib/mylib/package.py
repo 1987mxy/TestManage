@@ -29,8 +29,7 @@ def pack2(result):  #反馈包
                                                  result)
     return package
     
-def pack3(path, names):  #下载更新文件包
-        packages = []
+def pack3_compression(path, names):  #下载更新文件包
         chkPath(r'.\temp')
         for n in names:
             if n == '*.*' or ospath.exists('%s%s'%(path, n)):
@@ -39,6 +38,10 @@ def pack3(path, names):  #下载更新文件包
                 raise Exception('%s%s not exists!'%(path, n))
         LOG.debug(mylib.rar.compression('down', '.\\temp\\', names))
         LOG.info('压缩文件%s'%names)
+        
+def pack3_upload():
+        packages = []
+        insertHeartFlag = 50
         data = open(r'.\temp\down.rar','rb').read()
         filepack_len = data.__len__()/PACKAGE_SIZE
         filepack_handler = pack('<HLHHL', 12 + PACKAGE_SIZE, 
@@ -48,6 +51,11 @@ def pack3(path, names):  #下载更新文件包
                                           0)
         for i in range(filepack_len):
             packages += [filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE]]
+            if insertHeartFlag:
+                insertHeartFlag -= 1
+            else:
+                packages.append(pack6())
+                insertHeartFlag = 50
         filepack_handler = pack('<HLHHL', 12 + data.__len__() - filepack_len * PACKAGE_SIZE, 
                                           0xAAAC, 
                                           12 + data.__len__() - filepack_len * PACKAGE_SIZE, 
@@ -58,9 +66,8 @@ def pack3(path, names):  #下载更新文件包
         LOG.info('send filepackage_size is %s Byte'%packages.__len__())
         return packages
     
-def pack4(ip, spath, names):  #上传LOG文件包
+def pack4_compression(ip, spath, names):  #上传LOG文件包
         result = ''
-        packages = []
         ns = []
         chkPath(r'.\temp')
         for n in names:
@@ -74,6 +81,12 @@ def pack4(ip, spath, names):  #上传LOG文件包
             result = '%s%s%s_%s\n'%(result, r, ip, realn)
         system('msg %username% "log已收集,请继续测试!"')
         LOG.debug(mylib.rar.compression('up', '.\\temp\\', ns))
+        return result
+
+def pack4_upload(ip):
+        result = ''
+        insertHeartFlag = 50
+        packages = []
         LOG.info('成功压缩文件')
         data = open(r'.\temp\up.rar','rb').read()
         dname = '%s_up'%ip
@@ -87,7 +100,11 @@ def pack4(ip, spath, names):  #上传LOG文件包
         filepack_len = data.__len__()/PACKAGE_SIZE
         for i in range(filepack_len):
             packages += [filepack_handler, data[i*PACKAGE_SIZE:(i+1)*PACKAGE_SIZE]]
-#            LOG.info(package.__repr__())#####################
+            if insertHeartFlag:
+                insertHeartFlag -= 1
+            else:
+                packages.append(pack6())
+                insertHeartFlag = 50
         filepack_handler = pack('<HLHHLH%ss'%dname.__len__(), 14 + data.__len__() - filepack_len * PACKAGE_SIZE + dname.__len__(), 
                                                               0xAAAC, 
                                                               14 + data.__len__() - filepack_len * PACKAGE_SIZE + dname.__len__(), 
@@ -97,7 +114,6 @@ def pack4(ip, spath, names):  #上传LOG文件包
                                                               dname)
         packages += [filepack_handler, data[filepack_len * PACKAGE_SIZE:]]
         packages = ''.join(packages)
-#        LOG.info(package.__repr__())#####################
         LOG.info('send filesize is %s Byte'%packages.__len__())
         return [result, packages]
  
