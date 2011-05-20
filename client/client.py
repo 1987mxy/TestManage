@@ -282,7 +282,7 @@ class ManageClient(object):
                     #================杀进程=================
                     #================开进程=================
                     elif self.stepList[0] == 'open':
-                        runCMD('start /B "" /d "%s" "%s"' % (self.localpath, flag))
+                        runCMD('start "" /d "%s" "%s"' % (self.localpath, flag))
                         LOG.info('运行文件%s'%flag)
                         self.result.append('运行文件%s'%flag)
                     #================开进程=================

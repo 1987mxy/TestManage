@@ -109,6 +109,8 @@ fixed to 0x0003 and 0x0004 package information do not print
 5-20
 copy log file is asynchronism. heart package trigger that check copy file done
 compression log file is asychronism. heart package trigger that check compression file done
+return to control "heart time out or disconnect ..." request check in CLTLIST
+remove "start /B" in open step
 get step from package 0x0001 to self.stepList. remove the step from self.stepList when done the step
 _manageChar mothed change to copyLog mothed in ManageClient class, and do not copy . and ..
 creat parser.py which parser log file

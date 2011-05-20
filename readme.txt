@@ -85,6 +85,8 @@ testmachine5-6
 testmachine5-20
 修复复制文件.和..情况
 修复后台出现许多cmd.exe进程的情况(弃用os.system)
+修复了未被控制机器也返回heart time out or disconnect ...信息的情况
+修复open批处理文件时在后台运行的bug
 因为大文件压缩而导致的心跳检测超时调试完毕
 因为大LOG复制而导致超时情况
 当删除进程后对已删除进程添加检测

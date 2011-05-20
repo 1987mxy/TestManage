@@ -188,7 +188,7 @@ class testManage(net):
         self.sock.close()
         if self.address in CHList.keys():    #²»ÊÇCONTROL
             del(CHList[self.address])
-            if CONTROL and self.broadcast in CLTLIST:
+            if CONTROL and self.address in CLTLIST:
                 info = '%s heart time out or disconnect ...'%self.address
                 CONTROL.send(mylib.package.pack2(info))
             self.chkEnd(self.address)
