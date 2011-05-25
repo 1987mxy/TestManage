@@ -9,6 +9,10 @@ from mylib.log import LOG
 import mylib.rar
 
 
+def getBasicData():
+    pass
+    
+
 def pack1(cltlist_string, cmdpack):  #指令包
     mdata_len = cltlist_string.__len__() + cmdpack.__len__()
     package = pack('<HLHHL%ss'%mdata_len, 12 + mdata_len, 
@@ -115,9 +119,9 @@ def make_response_clt(encoded):  #logined
         #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4)
         message_pack_header_def='<HLHHL'
         package = '%s%s'%(pack(message_pack_header_def,
-                               calcsize(message_pack_header_def) -2 +len(encoded),
+                               calcsize(message_pack_header_def) - 2 +len(encoded),
                                0xABDE,
-                               calcsize(message_pack_header_def) -2 +len(encoded),
+                               calcsize(message_pack_header_def) - 2 +len(encoded),
                                0x9002,
                                0),
                           encoded)
@@ -125,30 +129,13 @@ def make_response_clt(encoded):  #logined
     
 def make_transmit(encoded):
         #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4)
-        message_pack_header_def='<HLHHL' + 'L'    #4位的packageID
+        message_pack_header_def='<HLHHL'
         package = "%s%s" %(pack(message_pack_header_def,
-                                calcsize(message_pack_header_def) -2 +len(encoded),
+                                calcsize(message_pack_header_def) - 2 +len(encoded),
                                 0xABDE,
-                                calcsize(message_pack_header_def) -2 +len(encoded),
+                                calcsize(message_pack_header_def) - 2 +len(encoded),
                                 0x9003,
                                 0, 
                                 ),
                            encoded)
         return package
-    
-def make_response9003(packageID):
-        message_pack_header_def='<HLHHL' + 'L' #4位的packageID
-        package = pack(message_pack_header_def,
-                                calcsize(message_pack_header_def) -2,
-                                0xABDE,
-                                calcsize(message_pack_header_def) -2,
-                                0x9ff3,
-                                0, 
-                                packageID)
-        return package
-    
-def make_packageID(packageID, encoded):
-        packsize = unpack('<H',encoded[:2]) + 4
-        package = pack('<H%sL'%len(encoded[2:]), packsize, encoded[2:], packageID)
-        return package
-    

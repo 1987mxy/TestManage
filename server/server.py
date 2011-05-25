@@ -13,7 +13,7 @@ import time
 from mylib.log import LOG
 import mylib.package
 from mylib import settings
-from mylib.other import chkPath
+#from mylib.other import chkPath
 
 from protobuf.msg_base_pb2 import Msg
 from protobuf.res_base_pb2 import Response
@@ -24,9 +24,9 @@ import roachlib.scheduler
 
 RUN = True
 
-CHList = {}   #链接上此服务器的client的广播channel列表
-CLTLIST = []   #一次case的client列表由0x0001包中获得
-CONTROL = None  #一次case的控制端的广播channel
+connectClient = {}   #链接上此服务器的client的列表
+beControlClient = []   #一次case的client列表由0x0001包中获得
+control = None  #一次case的控制端的广播channel
 LoginInfo = {}  #虚拟登录时返回的登录信息
 
 TASK_APP = []
@@ -49,7 +49,7 @@ class MyStacklessChannel(stackless.channel):
 
 class net(object):
     def __init__(self, sock, addr, options):
-        if self.__class__ is net:
+        if self.__class__ is net:   #抽象类检测
             LOG.error('net class dose not instantiation')
             raise 'net class dose not instantiation'
         self.address = '%s:%s'%addr
@@ -59,7 +59,6 @@ class net(object):
         self.magicCode = options.magicCode
         self.heartCode = options.heartCode
         self.responseCode = options.responseCode
-        self.packageID = 0
         self.headformat = '<HLHHL'
         self.broadcast = MyStacklessChannel()
         self.net_to_parse = MyStacklessChannel()
@@ -77,8 +76,7 @@ class net(object):
                 else:
                     self.death = False
                     pdata = self.parseHead('%s%s'%(pdata, rdata))
-        except :
-            LOG.error('type %s : %s'%(self.__class__, dir(self)))
+        except:
             LOG.error('receive error : %s'%format_exc())
             LOG.error('%s receive error : %s'%(self.address, 
                                                format_exc()))
@@ -108,8 +106,6 @@ class net(object):
                     self.exit()
                 elif self.switch:
                     if rdata.__class__ is list:
-                        if self.responseCode:
-                            self.packageID += 1
                         self.sock.sendall(rdata[0])
                         LOG.debug('uuid package %s send to %s : '%(rdata[1], self.address), rdata[0])
                     else:
@@ -147,12 +143,12 @@ class testManage(net):
         
         self.task_reHeart = stackless.tasklet(self.reHeart)(10)
         self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
-        CHList[self.address] = self.broadcast
+        connectClient[self.address] = self
         self.task_receive = stackless.tasklet(self.receive)()
         
         self.e_pack = mylib.package.packCtrlEnd()
-        self.user = None
-        self.uid = None
+        self.user = ''
+        self.uid = ''
         self.cltlist = []
         
         
@@ -171,38 +167,40 @@ class testManage(net):
             try:
                 h_pack = mylib.package.pack6(self.heartID)
                 self.sock.sendall(h_pack)
-                LOG.info('send heart %s to TestManage %s !'%(self.heartID, self.address))
+                LOG.debug('send heart %s to TestManage %s !'%(self.heartID, self.address))
                 if self.heartID >= 0xffffffff:
                     self.heartID = 0
                 else:
                     self.heartID += 1
-            except Exception, e:
-                print e
+            except:
+                LOG.debug(format_exc())
             SLEEP.delay_caller(time)
         
     def exit(self):
-        global CONTROL, CHList
+        global control, connectClient
         self.broadcast.close()
         self.net_to_parse.close()
         self.switch = False
         self.sock.close()
-        if self.address in CHList.keys():    #不是CONTROL
-            del(CHList[self.address])
-            if CONTROL and self.address in CLTLIST:
+        if self.address in connectClient.keys():
+            if control and self.address in beControlClient:
                 info = '%s heart time out or disconnect ...'%self.address
-                CONTROL.send(mylib.package.pack2(info))
+                control.broadcast.send(mylib.package.pack2(info))
             self.chkEnd(self.address)
-        elif self.broadcast == CONTROL:
-            CONTROL = None
+            del(connectClient[self.address])
+            if self.uid and self.uid in connectClient.keys() and self.broadcast in connectClient[self.uid]:       #client.exe退出时关闭该链接虚拟登录
+                connectClient[self.uid].remove(self)
+                if not connectClient[self.uid]:
+                    del(connectClient[self.uid])
+            LOG.info('%s TestManage exit...'%self.address)
+        elif self == control:      #不是CONTROL
+            control = None
             self.dispense('exit')
-        if self.uid in CHList.keys() and self.broadcast in CHList[self.uid]:       #client.exe退出时关闭该链接虚拟登录
-            CHList[self.uid].remove(self.broadcast)
-            if not CHList[self.uid]:
-                del(CHList[self.uid])
-        LOG.info('%s TestManage exit...'%self.address)
+            LOG.info('%s Control exit...'%self.address)
+        
     
     def listen_message(self):
-        global CLTLIST, CONTROL, RUN
+        global control, RUN
         msg = SocketLoginMessage()
         pbr = Response()
         while self.switch:
@@ -218,32 +216,34 @@ class testManage(net):
             LOG.debug('received package from TestManage %s : '%self.address, r_pack[2])
             result = ''
             if r_pack[1] == 0x0001:
-                CONTROL = self.broadcast
-                if self.address in CHList.keys():
-                    del(CHList[self.address])
+                control = self
+                if self.address in connectClient.keys():
+                    del(connectClient[self.address])
                 s_pack = self.getCltList(r_pack)
-                if CLTLIST:
-                    for ip in CLTLIST:
-                        CHList[ip].send('%sip:%s'%(s_pack, self._myIP(ip.split(':')[0])))
-                        LOG.info('send to TestManage %s'%ip)
-                else:
-                    self.broadcast.send(self.e_pack)
+                self.dispense(s_pack)
             elif r_pack[1] in [0x0002, 0x0004]:
-                if CONTROL:
-                    CONTROL.send(r_pack[2])
+                if control:
+                    control.broadcast.send(r_pack[2])
             elif r_pack[1] in [0x0003, 0xffff]:
                 self.dispense(r_pack[2])
             elif r_pack[1] == 0x0005:
-                if self.address in CHList.keys():
-                    del(CHList[self.address])
-                ips = []
-                for ip in CHList.keys():
-                    if ':' in ip:
-                        ch_len = 1
+                control = self
+                if self.address in connectClient.keys():
+                    del(connectClient[self.address])
+                ipList = []
+                uidList = []
+                for flag in connectClient.keys():
+                    if ':' in flag:
+                        ipList += [str(connectClient[flag].user), '\t', flag, '\n']
                     else:
-                        ch_len = CHList[ip].__len__()
-                    ips += [ip, '\t', str(ch_len), '\n']
-                result = ''.join(ips)
+                        clients = []
+                        for client in connectClient[flag]:
+                            clients += ['\t', client.address, '\n']
+                        clientString = ''.join(clients)
+                        uidList += [flag, '\t', str(len(connectClient[flag])), '\n', clientString]
+                summarizeIP = 'have connected client count : %s\n'%str(len(ipList)/4)
+                summarizeUID = 'have logined client count : %s\n'%str(len(uidList)/5)
+                result = ''.join(ipList + uidList + [summarizeIP, summarizeUID])
                 LOG.info(result)
                 s_pack = ''.join([mylib.package.pack2(result), self.e_pack])
                 self.broadcast.send(s_pack)
@@ -272,7 +272,7 @@ class testManage(net):
                     if pbr.code == 200000:
                         self.user = user
                         self.uid = str(pbr.userTCPLogin.uid)
-                        CHList[self.uid].append(self.broadcast)
+                        connectClient[self.uid].append(self)
                         LOG.info('%s_%s_%s TestManage double logined'%(user, 
                                                                        self.uid, 
                                                                        self.address))
@@ -282,6 +282,9 @@ class testManage(net):
                             del(LoginInfo[self.user])
                         LOG.error('%s_%s TestManage double logined failed !'%(user, 
                                                                               self.address))
+                else:
+                    self.uid=''
+                    self.user=''
 #===============================================================================
 # #===============================================================================
 # # 姚常鋆 C++ Client LOG收集逻辑
@@ -304,11 +307,13 @@ class testManage(net):
 #                    self.broadcast.send(mylib.package.packCltEnd())
 #===============================================================================
                 
-    def dispense(self, package):
-        global CLTLIST
-        for ip in CLTLIST:     #调出0x0001包中所存在的目的地址
-            if ip in CHList.keys():     #与正连接的客户端列表进行比较
-                CHList[ip].send(package)
+    def dispense(self, package, addip = False):
+        global beControlClient
+        for ip in beControlClient:     #调出0x0001包中所存在的目的地址
+            if ip in connectClient.keys():     #与正连接的客户端列表进行比较
+                if addip:
+                    package = '%sip:%s'%(package, self.encodeIP(ip.split(':')[0]))
+                connectClient[ip].broadcast.send(package)
                 LOG.debug('send to TestManage %s'%ip)
             else:
                 info = '%s connecting failed ...'%ip
@@ -317,20 +322,20 @@ class testManage(net):
                 self.chkEnd(ip)
 
     def chkEnd(self, addr):
-        global CLTLIST, CONTROL
-        if addr in CLTLIST:     #当客户端列表为空时，可以发送控制端收尾指令
-            CLTLIST.remove(addr)
-            if not CLTLIST and CONTROL:
-                CONTROL.send(self.e_pack)
+        global beControlClient
+        if addr in beControlClient:     #当客户端列表为空时，可以发送控制端收尾指令
+            beControlClient.remove(addr)
+            if not beControlClient and control:
+                control.broadcast.send(self.e_pack)
 
     def getCltList(self, r_pack):
-        global CLTLIST, CONTROL
+        global beControlClient
         cltstring_len = int(unpack('<H', r_pack[2][14:16])[0])
         if cltstring_len == 0xffff:
-            CLTLIST = [ip for ip in CHList.keys() if ':' in ip]   #没有':'则为virtual_message的链接,需要排除
+            beControlClient = [ip for ip in connectClient.keys() if ':' in ip]   #没有':'则为virtual_message的链接,需要排除
             cltstring_len = 0
         elif cltstring_len > 0xf000:
-            CLTLIST = [ip for ip in CHList.keys() if ':' in ip]
+            beControlClient = [ip for ip in connectClient.keys() if ':' in ip]
             cltstring_len = cltstring_len - 0xf000
             cltstring = r_pack[2][16 : 16 + cltstring_len]
             for i in range(0, cltstring_len, 6):
@@ -341,17 +346,17 @@ class testManage(net):
                                            ord(cltstring[i+2]),
                                            ord(cltstring[i+3]), 
                                            port)
-                    if ip in CLTLIST:
-                        CLTLIST.remove(ip)
+                    if ip in beControlClient:
+                        beControlClient.remove(ip)
                 else:
                     ip = '%s.%s.%s.%s:'%(ord(cltstring[i]),
                                         ord(cltstring[i+1]),
                                         ord(cltstring[i+2]),
                                         ord(cltstring[i+3]))
-                    tempCLTLIST = CLTLIST[:]
+                    tempCLTLIST = beControlClient[:]
                     for addr in tempCLTLIST:
                         if ip in addr:
-                            CLTLIST.remove(addr)
+                            beControlClient.remove(addr)
         else:    
             cltstring = r_pack[2][16 : 16 + cltstring_len]
             for i in range(0, cltstring_len, 6):
@@ -362,30 +367,30 @@ class testManage(net):
                                            ord(cltstring[i+2]),
                                            ord(cltstring[i+3]), 
                                            port)
-                    tempCLTLIST = [addr for addr in CHList.keys() if ip == addr]
+                    tempCLTLIST = [addr for addr in connectClient.keys() if ip == addr]
                 else:
                     ip = '%s.%s.%s.%s:'%(ord(cltstring[i]),
                                         ord(cltstring[i+1]),
                                         ord(cltstring[i+2]),
                                         ord(cltstring[i+3]))
-                    tempCLTLIST = [addr for addr in CHList.keys() if ip in addr]
+                    tempCLTLIST = [addr for addr in connectClient.keys() if ip in addr]
                 if tempCLTLIST:
-                    CLTLIST += tempCLTLIST
+                    beControlClient += tempCLTLIST
                 else:
                     result = '%s connecting failed...\n'%ip
                     s_pack = mylib.package.pack2(result)
-                    CONTROL.send(s_pack)
+                    control.broadcast.send(s_pack)
         m_pack = r_pack[2][16 + cltstring_len : ]
-        s_pack = pack('<HLHHL', 
-                      r_pack[0] - cltstring_len + 16,    #16 = 18(myIP) - 2
-                      0xAAAC, 
-                      r_pack[0] - cltstring_len + 16, 
-                      r_pack[1], 
-                      0)
-        s_pack += m_pack
+        s_pack = '%s%s'%(pack('<HLHHL', 
+                              r_pack[0] - cltstring_len + 16,    #16 = 18(myIP) - 2(client_len)
+                              0xAAAC, 
+                              r_pack[0] - cltstring_len + 16, 
+                              r_pack[1], 
+                              0),
+                         m_pack)
         return s_pack
 
-    def _myIP(self, ip):
+    def encodeIP(self, ip):
         ips = ip.split('.')
         tempip = ''
         for i in ips:
@@ -403,9 +408,9 @@ class VirtualMessage_to_Client(net):
         self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
         self.task_receive = stackless.tasklet(self.receive)()
         
-        self.uid = None
-        self.sid = None
-        self.user = None
+        self.uid = ''
+        self.sid = ''
+        self.user = ''
 
     def chkHeart(self, time):
         while (not self.death) and self.switch:
@@ -421,10 +426,10 @@ class VirtualMessage_to_Client(net):
         self.net_to_parse.close()
         self.switch = False
         self.sock.close()
-        if self.uid in CHList.keys():
-            if self.broadcast in CHList[self.uid]:
-                CHList[self.uid].remove(self.broadcast)
-            if len(CHList[self.uid]) <= 1:
+        if self.uid in connectClient.keys():
+            if self in connectClient[self.uid]:
+                connectClient[self.uid].remove(self)
+            if len(connectClient[self.uid]) <= 1:
                 self.do_logout()
         LOG.info('%s GMClient exit...'%self.address)
 
@@ -471,7 +476,7 @@ class VirtualMessage_to_Client(net):
                             if pbr.code == 200000:
                                 self.user = user
                                 self.uid = str(pbr.userTCPLogin.uid)
-                                CHList[self.uid].append(self.broadcast)
+                                connectClient[self.uid].append(self)
                                 LOG.info('%s_%s_%s GMClient double logined ...'%(self.user, 
                                                                                  self.uid, 
                                                                                  self.address))
@@ -496,7 +501,7 @@ class VirtualMessage_to_Client(net):
                                 self.user = user
                                 self.uid = str(pbr.userTCPLogin.uid)
                                 self.sid = pbr.userTCPLogin.sid
-                                CHList[self.uid] = [self.broadcast]
+                                connectClient[self.uid] = [self]
                                 LoginInfo[user] = self.sid
                                 LOG.info('%s_%s_%s GMClient logined ...'%(self.user, 
                                                                           self.uid, 
@@ -523,7 +528,7 @@ class VirtualMessage_to_Client(net):
                 LOG.error(format_exc())
 
     def do_logout(self):
-        if self.uid in CHList.keys() and self.user in LoginInfo.keys():
+        if self.uid in connectClient.keys() and self.user in LoginInfo.keys():
             while True:
                 pbr = Response()
                 url = '%s/user.tcplogout/?alt=pbbin&sid=%s&service=msg'%(settings.APPSERVER,
@@ -540,23 +545,23 @@ class VirtualMessage_to_Client(net):
                                                                         pbr))
                 if pbr.code == 200000:
                     del(LoginInfo[self.user])
-                    LOG.info('%s_%s_%s GMClient logouted...'%(self.user, 
+                    LOG.info('%s_%s_%s GMClient logouted ...'%(self.user, 
                                                               self.uid, 
                                                               self.address))
-                    self.user = None
-                    for ch in CHList[self.uid]:
-                        ch.send(mylib.package.make_response_clt(mdata))
-                        CHList[self.uid].remove(ch)
-                    if len(CHList[self.uid]) <= 1:
-                        del(CHList[self.uid])
+                    self.user = ''
+                    for virtualMessageClient in connectClient[self.uid]:
+                        virtualMessageClient.broadcast.send(mylib.package.make_response_clt(mdata))
+                        connectClient[self.uid].remove(virtualMessageClient)
+                    if len(connectClient[self.uid]) <= 1:
+                        del(connectClient[self.uid])
                     break
                 else:
                     LOG.error('%s_%s_%s GMClient logout failed : %s'%(self.user, 
                                                                       self.uid, 
                                                                       self.address, 
                                                                       pbr))
-                    for ch in CHList[self.uid]:
-                        ch.send(mylib.package.make_response_clt(mdata))
+                    for virtualMessageClient in connectClient[self.uid]:
+                        virtualMessageClient.broadcast.send(mylib.package.make_response_clt(mdata))
                     SLEEP.delay_caller(5)
                         
 
@@ -586,19 +591,31 @@ class VirtualMessage_to_Service(net):
                 LOG.info('APP Service %s code: %x'%(self.address, 
                                                     r_pack[1]))
                 if r_pack[1] == 0x7001:
-                    receivers_list = self.getReceivers(r_pack[2])
                     self.broadcast.send(mylib.package.make_response_app(0))
-                    msg.ParseFromString(self.package)
-                    LOG.debug('APP Service transmit package : %s'%msg)
+                    receivers_list = self.getReceivers(r_pack[2])
+                    msg.ParseFromString(self.package)   ###################
+                    LOG.debug('APP Service transmit package : %s'%msg)    ###############
                     for receiver in receivers_list:
-                        if str(receiver) in CHList.keys():
+                        if str(receiver) in connectClient.keys():
                             LOG.debug('APP Service %s transmit to receiver %s : '%(self.address,
                                                                                    receiver), 
                                      self.package)
                             s_string = mylib.package.make_transmit(self.package)
-                            for ch in CHList[str(receiver)]:
-                                ch.send([s_string,msg.uuid])
-                            
+                            for virtualMessageClient in connectClient[str(receiver)]:
+                                virtualMessageClient.broadcast.send([s_string,msg.uuid])
+                elif r_pack[1] == 0x7003:
+                    self.broadcast.send(mylib.package.make_response_app(0))
+                    self.package = r_pack[2][14:]
+                    msg.ParseFromString(self.package)   ###################
+                    LOG.debug('APP Service transmit package : %s'%msg)    ###############
+                    for receiver in connectClient.keys(): 
+                        if not ':' in receiver:
+                            LOG.debug('APP Service %s transmit to receiver %s : '%(self.address,
+                                                                                   receiver), 
+                                      self.package)
+                            s_string = mylib.package.make_transmit(self.package)
+                            for virtualMessageClient in connectClient[receiver]:
+                                virtualMessageClient.broadcast.send([s_string,msg.uuid])
                 else:
                     LOG.warning('unknow code from APP Service %s : %x'%(self.address, 
                                                                         r_pack[1]))
