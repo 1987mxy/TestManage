@@ -19,5 +19,5 @@ def chkPath(filepath):
 def killProcess(processName):
     result = runCMD('taskkill /f /im %s'%processName)
     if processName in popen('tasklist /FI "IMAGENAME eq %s"'%processName).read():
-        LOG.warning('Process %s do not death!')
+        LOG.warning('Process %s do not death!'%processName)
     return result

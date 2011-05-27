@@ -123,3 +123,11 @@ service add receive package 0x7003 from APP service
 =========================================
 5-24
 fix addr in beControlClient and not in connectClient when received package 0x0001
+=========================================
+5-25
+fix bug : log print "Process %s do not death!"
+fix bug :  File "client.py", line 156, in parseHead, AttributeError: 'ManageClient' object has no attribute 'address'
+=========================================
+5-27
+use os.access() get file open popedom
+copy full log file send to control if upload file list first word is "!", otherwise copy log file 25MB of last

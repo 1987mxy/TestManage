@@ -9,7 +9,7 @@ from win32file import GetLogicalDrives
 from time import sleep
 from struct import unpack, pack
 
-from mylib.log import LOG, get_screen
+from mylib.log import LOG, uuidLog, get_screen
 from mylib.other import runCMD, chkPath, killProcess
 from mylib.msg_base_pb2 import Msg
 import mylib.rar
@@ -110,6 +110,7 @@ class ManageClient(object):
                 if head[1] == 0xABDE:
                     if head[3] == 0x9003:
                         self.msg.ParseFromString(mdata[14:])
+                        uuidLog.debug('%s\t%s'%(self.msg.uuid, '%s:%s'%self.socket.getsockname()))
                         if self.msg.code == 0x230d and (not self.msg.arenaEnded.error):
                             GameStatus = os.getenv('GAMESTATUS')    #获取环境变量 
                             if GameStatus != None and int(GameStatus) < 4:
@@ -152,7 +153,7 @@ class ManageClient(object):
                         LOG.debug('received package from Service : ', mdata)
                         self.r_pack.append([head[0], head[3], mdata])
                 else:
-                    LOG.error('receive FIFA package from %s : %s' % (self.address, mdata.__repr__()))
+                    LOG.error('receive FIFA package from %s : ' % SERVER, mdata)
                     self.close()
                 data = self.parseHead(data)
         return data
@@ -206,10 +207,14 @@ class ManageClient(object):
     def operation(self):
         try:
             while len(self.stepList):
-                #上传Log=================
+                #================上传Log=================
                 if self.stepList[0] == 'up':
-                    notNullWildcard = [uploadFileName for uploadFileName in re.split('\|', self.data[self.stepList[0]]) if uploadFileName]
-                    self.copyLog(self.localpath, notNullWildcard)
+                    if self.data[self.stepList[0]][0] == '!':
+                        notNullWildcard = [uploadFileName for uploadFileName in re.split('\|', self.data[self.stepList[0]][1:]) if uploadFileName]
+                        self.copyLog(self.localpath, notNullWildcard, isfull = True)
+                    else:
+                        notNullWildcard = [uploadFileName for uploadFileName in re.split('\|', self.data[self.stepList[0]]) if uploadFileName]
+                        self.copyLog(self.localpath, notNullWildcard)
                     self.stepList[0] = 'chkCopyLog'
                     continue
                 #================上传Log=================
@@ -232,13 +237,10 @@ class ManageClient(object):
                     continue
                 elif self.stepList[0] == 'chkCopyLog':
                         for n in self.copyLogNames:
-                            if os.path.exists(r'.\temp\%s'%n):
-                                try:
-                                    copyLog = open(r'.\temp\%s'%n, 'r')
-                                    copyLog.close()
-                                except:
-                                    LOG.info(r'.\temp\%s未复制完成'%n)
-                                    return
+                            if os.access(r'.\temp\%s'%n, os.F_OK) and os.access(r'.\temp\%s'%n, os.R_OK) and os.access(r'.\temp\%s'%n, os.W_OK) and os.access(r'.\temp\%s'%n, os.X_OK):
+                                pass
+                            else:
+                                return
                         os.popen('start msg %username% "log已收集,请继续测试!"')
                         LOG.debug(mylib.rar.compression('up', '.\\temp\\', self.copyLogNames))
                         self.stepList[0] = 'chkCompression'
@@ -247,11 +249,10 @@ class ManageClient(object):
                     if 'Rar.exe' in os.popen('tasklist /FI "IMAGENAME eq rar.exe"').read():
                         return
                     else:
-                        if os.path.exists(r'.\temp\up.rar'):
-                            try:
-                                uprar = open(r'.\temp\up.rar','r')
-                                uprar.close()
-                            except:
+                        if os.access(r'.\temp\up.rar',os.F_OK):
+                            if os.access(r'.\temp\up.rar', os.R_OK) and os.access(r'.\temp\up.rar', os.W_OK) and os.access(r'.\temp\up.rar', os.X_OK):
+                                pass
+                            else:
                                 return
                             package = mylib.package.pack4(self.returnIP)
                             self.result.append('成功压缩文件')
@@ -337,7 +338,7 @@ class ManageClient(object):
             self.result = [self.returnIP, ' error : ', format_exc(), '\n', self.localpath, '\n'] + self.result
             LOG.error(''.join(self.result))
 
-    def copyLog(self, path, fileNames):   #根据通配符得到相应文件列表,如果直接用通配符无法在文件名中+上IP
+    def copyLog(self, path, fileNames, isfull = False):   #根据通配符得到相应文件列表,如果直接用通配符无法在文件名中+上IP
         chkPath(r'.\temp')
         for fileName in fileNames:
             dirResult = os.popen(r'dir "%s%s"' % (path, fileName)).readlines()
@@ -346,8 +347,23 @@ class ManageClient(object):
             for line in dirResult[5:-2]:
                 dirline = re.split(' +', line[:-1], 3)
                 if len(dirline) > 3 and not dirline[3] in ['.','..']:
-                    self.copyLogNames.append('%s_%s'%(self.returnIP, dirline[3]))
-                    os.popen(r'start /B copy /y "%s%s" ".\temp\%s_%s"'%(path, dirline[3], self.returnIP, dirline[3]))
+                    
+                    logFileName = r'%s%s'%(path, dirline[3])
+                    
+                    logFileSize = os.stat(logFileName).st_size
+                    if logFileSize < 25000000 or isfull:
+                        newFileName = r'.\temp\%s_%s'%(self.returnIP, dirline[3])
+                        self.copyLogNames.append('%s_%s'%(self.returnIP, dirline[3]))
+                        os.popen(r'start /B copy /y "%s%s" ".\temp\%s_%s"'%(path, dirline[3], self.returnIP, dirline[3]))
+                    else:
+                        newFileName = r'.\temp\%s_cut_%s'%(self.returnIP, dirline[3])
+                        self.copyLogNames.append('%s_cut_%s'%(self.returnIP, dirline[3]))
+                        logFile = open(logFileName, 'r+')
+                        logFile.seek(logFileSize - 25000000)
+                        newFile = open(newFileName, 'w')
+                        newFile.write(logFile.read())
+                        logFile.close()
+                        newFile.close()
 
     def chkGMClient(self):
         global GMPORT
@@ -384,7 +400,6 @@ if __name__ == '__main__':
     PATH = CONF.getCltPath()
     USER = CONF.getUser()
     PASSWD = CONF.getPasswd()
-    
     IP = _getIP()
     while 1:
         try:

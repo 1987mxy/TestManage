@@ -10,7 +10,7 @@ from struct import unpack, pack
 import time
 
 
-from mylib.log import LOG
+from mylib.log import LOG, uuidLog
 import mylib.package
 from mylib import settings
 #from mylib.other import chkPath
@@ -107,7 +107,7 @@ class net(object):
                 elif self.switch:
                     if rdata.__class__ is list:
                         self.sock.sendall(rdata[0])
-                        LOG.debug('uuid package %s send to %s : '%(rdata[1], self.address), rdata[0])
+                        uuidLog.debug('%s\t%s : '%(rdata[1], self.address), rdata[0])
                     else:
                         self.sock.sendall(rdata)
                         LOG.debug('send to %s : '%self.address, rdata)
@@ -220,7 +220,7 @@ class testManage(net):
                 if self.address in connectClient.keys():
                     del(connectClient[self.address])
                 s_pack = self.getCltList(r_pack)
-                self.dispense(s_pack)
+                self.dispense(s_pack, addip = True)
             elif r_pack[1] in [0x0002, 0x0004]:
                 if control:
                     control.broadcast.send(r_pack[2])

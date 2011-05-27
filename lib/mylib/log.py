@@ -147,4 +147,18 @@ def run_log():
 #    return myplog
 #===============================================================================
 
+def uuid_log():
+#    runlog
+    uuidlog = logging.getLogger('uuidlog')
+    uuidlog.setLevel(logging.DEBUG)
+    lpath = _pathrule('uuidlog')
+    logfile = logging.FileHandler(lpath, "w")
+    logfile.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    logfile.setFormatter(fmt)
+    uuidlog.addHandler(logfile)
+    return uuidlog
+
 LOG = run_log()
+uuidLog = uuid_log()
+
