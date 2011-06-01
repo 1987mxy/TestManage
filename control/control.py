@@ -57,6 +57,7 @@ class MainOperation(object):
         self.socket.sendall(self.s_pack)
         LOG.debug('send to Serivce : ', self.s_pack)
         self.socket.settimeout(HEARTTIMEOUT)
+        LOG.info('send over!')
         
     def receive(self):
         while self.switch:
@@ -79,6 +80,7 @@ class MainOperation(object):
                         self.close()
                         LOG.info('%s receive data done!\n'%SERVER)
                     elif head[3] == 0x0006:
+                        LOG.debug('received heart %s!'%unpack('<L', mdata[-4:]))
                         self.socket.sendall(mdata)
                         LOG.debug('received heart!')
                     else:

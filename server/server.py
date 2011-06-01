@@ -151,7 +151,6 @@ class testManage(net):
         self.uid = ''
         self.cltlist = []
         
-        
         self.file = {}
         
     def chkHeart(self, time):
@@ -188,7 +187,7 @@ class testManage(net):
                 control.broadcast.send(mylib.package.pack2(info))
             self.chkEnd(self.address)
             del(connectClient[self.address])
-            if self.uid and self.uid in connectClient.keys() and self.broadcast in connectClient[self.uid]:       #client.exe退出时关闭该链接虚拟登录
+            if self.uid and self.uid in connectClient.keys() and self in connectClient[self.uid]:       #client.exe退出时关闭该链接虚拟登录
                 connectClient[self.uid].remove(self)
                 if not connectClient[self.uid]:
                     del(connectClient[self.uid])
@@ -312,9 +311,11 @@ class testManage(net):
         for ip in beControlClient:     #调出0x0001包中所存在的目的地址
             if ip in connectClient.keys():     #与正连接的客户端列表进行比较
                 if addip:
-                    package = '%sip:%s'%(package, self.encodeIP(ip.split(':')[0]))
-                connectClient[ip].broadcast.send(package)
-                LOG.debug('send to TestManage %s'%ip)
+                    tempPackage = '%sip:%s'%(package, self.encodeIP(ip.split(':')[0]))
+                else:
+                    tempPackage = package
+                connectClient[ip].broadcast.send(tempPackage)
+                LOG.debug('send to TestManage %s : '%ip, tempPackage)
             else:
                 info = '%s connecting failed ...'%ip
                 LOG.info(info)
@@ -407,31 +408,40 @@ class VirtualMessage_to_Client(net):
         
         self.task_chkHeart = stackless.tasklet(self.chkHeart)(30)
         self.task_receive = stackless.tasklet(self.receive)()
-        
         self.uid = ''
         self.sid = ''
         self.user = ''
+        self.userReset()
+        
+        
 
     def chkHeart(self, time):
         while (not self.death) and self.switch:
             self.death = True
             SLEEP.delay_caller(time)
         if self.switch:
-            LOG.error('%s %s_%s GMClient heart time out !'%(self.address, self.user, self.uid))
+            LOG.error('%s_%s_%s GMClient heart time out !'%(self.user, self.uid, self.address))
             self.exit()
 
-    def exit(self):
-        self.broadcast.close()
-        
-        self.net_to_parse.close()
-        self.switch = False
-        self.sock.close()
+    def userReset(self):
         if self.uid in connectClient.keys():
             if self in connectClient[self.uid]:
                 connectClient[self.uid].remove(self)
             if len(connectClient[self.uid]) <= 1:
                 self.do_logout()
-        LOG.info('%s GMClient exit...'%self.address)
+                
+        self.uid = ''
+        self.sid = ''
+        self.user = ''
+        
+
+    def exit(self):
+        self.broadcast.close()
+        self.net_to_parse.close()
+        self.switch = False
+        self.sock.close()
+        LOG.info('%s_%s_%s GMClient exit...'%(self.user, self.uid, self.address))
+        self.userReset()
 
     def listen_message(self):
         while self.switch:
@@ -458,8 +468,9 @@ class VirtualMessage_to_Client(net):
                     msg = SocketLoginMessage()
                     msg.ParseFromString(r_pack[2][14:])
                     user = msg.userName
-                    LOG.debug('receive login_msg from GMClient %s : %s'%(self.address,
-                                                                         msg))
+                    LOG.debug('receive login_msg from GMClient %s_%s : %s'%(user,
+                                                                            self.address,
+                                                                            msg))
                     if msg.code == 1:
                         if user in LoginInfo.keys():    #virtual login
                             sid = LoginInfo[user]
@@ -467,12 +478,12 @@ class VirtualMessage_to_Client(net):
                                                                                     sid)
                             r_pack[2] = urlopen(url).read()
                             LOG.info('%s_%s GMClient send http request : %s'%(user,
-                                                                              self.address, 
-                                                                              url))
+                                                                                 self.address, 
+                                                                                 url))
                             pbr.ParseFromString(r_pack[2])
                             LOG.debug('%s_%s GMClient receive http response : %s'%(user, 
-                                                                                  self.address, 
-                                                                                  pbr))
+                                                                                   self.address, 
+                                                                                   pbr))
                             if pbr.code == 200000:
                                 self.user = user
                                 self.uid = str(pbr.userTCPLogin.uid)
@@ -483,8 +494,9 @@ class VirtualMessage_to_Client(net):
                             else:
                                 #此时sid已经过期用sid登出是没有意义的
                                 del(LoginInfo[user])
-                                LOG.error('%s_%s GMClient double logined failed !'%(user, 
-                                                                                    self.address))
+                                LOG.error('%s_%s_%s GMClient double logined failed !'%(self.user, 
+                                                                                       self.uid, 
+                                                                                       self.address))
                         else:
                             url = '%s/user.tcplogin/?alt=pbbin&username=%s&password=%s&service=msg'%(settings.APPSERVER, 
                                                                                                      user, 
@@ -495,8 +507,8 @@ class VirtualMessage_to_Client(net):
                                                                              url))
                             pbr.ParseFromString(r_pack[2])
                             LOG.debug('%s_%s GMClient receive http response: %s'%(user, 
-                                                                                 self.address, 
-                                                                                 pbr))
+                                                                                  self.address, 
+                                                                                  pbr))
                             if pbr.code == 200000:
                                 self.user = user
                                 self.uid = str(pbr.userTCPLogin.uid)
@@ -544,16 +556,16 @@ class VirtualMessage_to_Client(net):
                                                                         self.address, 
                                                                         pbr))
                 if pbr.code == 200000:
-                    del(LoginInfo[self.user])
+                    if self.user in LoginInfo.keys():
+                        del(LoginInfo[self.user])
                     LOG.info('%s_%s_%s GMClient logouted ...'%(self.user, 
-                                                              self.uid, 
-                                                              self.address))
-                    self.user = ''
-                    for virtualMessageClient in connectClient[self.uid]:
-                        virtualMessageClient.broadcast.send(mylib.package.make_response_clt(mdata))
-                        connectClient[self.uid].remove(virtualMessageClient)
-                    if len(connectClient[self.uid]) <= 1:
+                                                               self.uid, 
+                                                               self.address))
+                    if self.uid in connectClient.keys():
+                        for virtualMessageClient in connectClient[self.uid]:
+                            virtualMessageClient.broadcast.send(mylib.package.make_response_clt(mdata))
                         del(connectClient[self.uid])
+                    self.userReset()
                     break
                 else:
                     LOG.error('%s_%s_%s GMClient logout failed : %s'%(self.user, 
@@ -679,7 +691,16 @@ if __name__ == '__main__':
         TASK_APP.append(stackless.tasklet(APPThread)())
         TASK_CLT.append(stackless.tasklet(CltThread)())
     TASK_TEST.append(stackless.tasklet(TestThread)())
-    while RUN:
-        stackless.run()
-        time.sleep(0.05)
+    try:
+        while RUN:
+            stackless.run()
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        for key in connectClient.keys():
+            if key in connectClient.keys():
+                if connectClient[key].__class__ is list:
+                    for connecter in connectClient[key]:
+                        connecter.broadcast.send('exit')
+                else:
+                    connectClient[key].broadcast.send('exit')
         

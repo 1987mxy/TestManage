@@ -8,13 +8,15 @@ from traceback import format_exc
 from win32file import GetLogicalDrives
 from time import sleep
 from struct import unpack, pack
+from protobuf.msg_base_pb2 import Msg
+
 
 from mylib.log import LOG, uuidLog, get_screen
 from mylib.other import runCMD, chkPath, killProcess
-from mylib.msg_base_pb2 import Msg
 import mylib.rar
 import mylib.package
 from mylib.config import CONF
+from mylib.settings import CUTLOG_SIZE
 
 IP = None
 PATH = {}
@@ -55,6 +57,7 @@ class ManageClient(object):
     def __init__(self, sock):
         global PATH
         self.socket = sock
+        self.gmSocket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         self.login = False
         self.e_pack = mylib.package.packCtrlEnd()
         self.msg = Msg()
@@ -116,8 +119,12 @@ class ManageClient(object):
                             if GameStatus != None and int(GameStatus) < 4:
                                 get_screen()
                             LOG.info('Arena End info : ', mdata[14:])
-                            killProcess('war3.exe')
-                            killProcess('starcraft.exe')
+                            killProcessPackage = '\x21\x26\x33\x21\x0a\x00\x23\x10\x00\x00'
+                            try:
+                                self.gmSocket.sendall(killProcessPackage)
+                            except:
+                                LOG.error('send to GMClinet.exe failed!')
+                            LOG.debug('have sent package of kill games process')
                             #os.popen('start "" /d "%s" "GMClient.exe"'%os.getenv('TEMPPATH'))
                             #os.popen('close_war3.exe')
                         elif self.msg.code == 0x230b:
@@ -351,7 +358,7 @@ class ManageClient(object):
                     logFileName = r'%s%s'%(path, dirline[3])
                     
                     logFileSize = os.stat(logFileName).st_size
-                    if logFileSize < 25000000 or isfull:
+                    if logFileSize < CUTLOG_SIZE or isfull:
                         newFileName = r'.\temp\%s_%s'%(self.returnIP, dirline[3])
                         self.copyLogNames.append('%s_%s'%(self.returnIP, dirline[3]))
                         os.popen(r'start /B copy /y "%s%s" ".\temp\%s_%s"'%(path, dirline[3], self.returnIP, dirline[3]))
@@ -359,7 +366,7 @@ class ManageClient(object):
                         newFileName = r'.\temp\%s_cut_%s'%(self.returnIP, dirline[3])
                         self.copyLogNames.append('%s_cut_%s'%(self.returnIP, dirline[3]))
                         logFile = open(logFileName, 'r+')
-                        logFile.seek(logFileSize - 25000000)
+                        logFile.seek(logFileSize - CUTLOG_SIZE)
                         newFile = open(newFileName, 'w')
                         newFile.write(logFile.read())
                         logFile.close()
@@ -371,6 +378,10 @@ class ManageClient(object):
         port_info = netcmd.read()
         gmport_info = re.findall('\s0\.0\.0\.0:%s\s' % GMPORT, port_info)
         if gmport_info:
+            try:
+                self.gmSocket.connect(('127.0.0.1',13998))
+            except:
+                LOG.error('connect gmclient failed!')
             self.GMlogin()
 
     def GMlogin(self):

@@ -131,3 +131,10 @@ fix bug :  File "client.py", line 156, in parseHead, AttributeError: 'ManageClie
 5-27
 use os.access() get file open popedom
 copy full log file send to control if upload file list first word is "!", otherwise copy log file 25MB of last
+=========================================
+5-30
+send 0x1023 package to gmclient.exe for kill game process
+add uuid log recording uuid of full 0x9003 packages
+Ctrl+C terminated server.py
+fixed protocol can not parser uuid
+fixed testmanage disconnect to server and do not remove self in connectClient[uid]

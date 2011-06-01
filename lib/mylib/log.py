@@ -157,7 +157,8 @@ def uuid_log():
     fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     logfile.setFormatter(fmt)
     uuidlog.addHandler(logfile)
-    return uuidlog
+    myUuidlog = mylog(uuidlog)
+    return myUuidlog
 
 LOG = run_log()
 uuidLog = uuid_log()
