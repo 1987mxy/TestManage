@@ -14,11 +14,11 @@ from mylib.config import CONF
 from mylib.other import chkPath
 import mylib.rar
 import mylib.package
-from mylib.log import LOG
+from mylib import log
 
 PATH = {}
 TIME = None
-OTHER = ''
+OTHER=[]
 HEARTTIMEOUT = 60
 
 def _getFTime():
@@ -29,16 +29,18 @@ def _getFTime():
 #class NetOperation(object):
 class MainOperation(object):
     def __init__(self):
-        global SERVER, PATH, PORT
+        global SERVER, PATH, PORT, OTHER
         self.s_pack = []
         self.e_pack = mylib.package.packCltEnd()
         self.w_pack = mylib.package.pack5()
         
+        OTHER = []
         self.pdata = ''
         self.r_pack = []
         self.other = None
         self.switch = True
         self.socket = None
+        self.sendover = False
         self.file = {}
 
     def connect(self):
@@ -51,23 +53,21 @@ class MainOperation(object):
         self.socket.close()
         
     def send(self):
-        self.socket.settimeout(0)
+        #self.socket.settimeout(0)
         self.s_pack.append(self.e_pack)
         self.s_pack = ''.join(self.s_pack)
         self.socket.sendall(self.s_pack)
-        LOG.debug('send to Serivce : ', self.s_pack)
-        self.socket.settimeout(HEARTTIMEOUT)
-        LOG.info('send over!')
+        log.LOG.debug('send to Serivce : ', self.s_pack)
         
     def receive(self):
         while self.switch:
             rdata = self.socket.recv(4096)
-            if not rdata:
-                LOG.error('%s_%s socket is closed!\n'%(SERVER, PORT))
-                self.close()
-            else:
-                LOG.debug('receive raw_string : ', rdata)
+            if rdata:
+                log.LOG.debug('receive raw_string : ', rdata)
                 self.pdata = self.parseHead('%s%s'%(self.pdata, rdata))
+            else:
+                log.LOG.error('%s_%s socket is closed!\n'%(SERVER, PORT))
+                self.close()
                 
     def parseHead(self, data):
         if len(data) >= 14:
@@ -78,18 +78,21 @@ class MainOperation(object):
                 if head[1] == 0xAAAC:
                     if head[3] == 0xff00:
                         self.close()
-                        LOG.info('%s receive data done!\n'%SERVER)
+                        log.LOG.info('%s receive data done!\n'%SERVER)
                     elif head[3] == 0x0006:
-                        LOG.debug('received heart %s!'%unpack('<L', mdata[-4:]))
-                        self.socket.sendall(mdata)
-                        LOG.debug('received heart!')
+                        if self.sendover:
+                            self.socket.sendall(mdata)
+                        log.LOG.debug('received heart %s!'%unpack('<L', mdata[-4:]))
+                    elif head[3] == 0xffff:
+                        self.sendover = True
+                        log.LOG.info('send over')
                     else:
                         self.r_pack.append([head[0], head[3], mdata])
-                        LOG.debug('received head from Service : [%d, %2x]'%(head[0], 
+                        log.LOG.debug('received head from Service : [%d, %2x]'%(head[0], 
                                                                             head[1]))
-                        LOG.debug('received package from Service : %s'%mdata.__repr__())
+                        log.LOG.debug('received package from Service : %s'%mdata.__repr__())
                 else:
-                    LOG.error('receive FIFA package from %s : %s'%(SERVER, mdata.__repr__()))
+                    log.LOG.error('receive FIFA package from %s : %s'%(SERVER, mdata.__repr__()))
                     self.close()
                 data = self.parseHead(data)
         return data
@@ -100,8 +103,8 @@ class MainOperation(object):
         total = 0
         for len, type, data in self.r_pack:
             if type == 0x0002:  #对指令的结果反馈
-                LOG.info(data[14:])
-                LOG.info('='*30)
+                log.LOG.info(data[14:])
+                log.LOG.info('='*30)
                 total += 1
             elif type == 0x0004:
                 filename_len = unpack('<H',data[14 : 16])[0]   #log文件名长度
@@ -109,17 +112,25 @@ class MainOperation(object):
                 if filename in self.file.keys():
                     self.file[filename].write(data[filename_len + 16 : ])   #补充文件
                 else:
-                    chkPath(r'.\temp')
-                    self.file[filename] = open(r'.\temp\%s.rar'%filename,'wb')
-                    self.file[filename].write(data[filename_len + 16 : ])
+                    if 'decompression' in OTHER:
+                        chkPath(r'.\temp')
+                        self.file[filename] = open(r'.\temp\%s.rar'%filename,'wb')
+                        self.file[filename].write(data[filename_len + 16 : ])
+                    else:
+                        chkPath(PATH['logpath'])
+                        self.file[filename] = open(r'%s%s.rar'%(PATH['logpath'], filename),'wb')
+                        self.file[filename].write(data[filename_len + 16 : ])
                 filesize += data[filename_len + 16 : ].__len__()
-        LOG.info('receive filesize is %s'%filesize)
-        LOG.info('response client total %s'%total)
+        log.LOG.info('receive filesize is %s'%filesize)
+        log.LOG.info('response client total %s'%total)
         for filename in self.file.keys():
             self.file[filename].close()
-            chkPath(PATH['logpath'])
-            LOG.debug(mylib.rar.decompression(filename, PATH['logpath'], False)) #解压log,此时socket已经断开不需要settimeout
-            LOG.info('解压%s到%s\n'%(filename, PATH['logpath']))
+            if 'decompression' in OTHER:
+                chkPath(PATH['logpath'])
+                log.LOG.debug(mylib.rar.decompression(filename, PATH['logpath'], False)) #解压log,此时socket已经断开不需要settimeout
+                log.LOG.info('解压%s到%s\n'%(filename, PATH['logpath']))
+            else:
+                log.LOG.info('%s下载到%s\n'%(filename, PATH['logpath']))
             
 #class MainOperation(object):
 #    def __init__(self):
@@ -144,13 +155,14 @@ class MainOperation(object):
             self.s_pack.append(mylib.package.pack1(cltlist_string, cmdpack))    #先发0x0001包是让server知道该转发给那些玩家
         if 'up' in step:
             dtldata['logpath'] = ''.join([dtldata['logpath'], TIME, '_', cmds[1], '\\'])
-            OTHER = 'up'
+            if dtldata['up'][0] == '!':
+                OTHER.append('decompression')
+            OTHER.append('up')
         if 'down' in step:   #step中没有down就不会产生文件包
             downFileName = dtldata['down'].split('|')
             self.s_pack.append(mylib.package.pack3(PATH['filepath'], downFileName))
         elif 'update' in step:
             self.s_pack.append(mylib.package.pack3('%supdate\\'%PATH['filepath'], ['*.*']))
-            OTHER = 'update'
         try:
             self.connect()
             self.socket.settimeout(HEARTTIMEOUT)
@@ -159,11 +171,11 @@ class MainOperation(object):
             self.listen_message()
         except Exception, e:
             if e.message == 'timed out':
-                LOG.error('%s : time out!'%SERVER)
+                log.LOG.error('%s : time out!'%SERVER)
             else:
-                LOG.error('%s : %s\n'%(SERVER, format_exc()))
+                log.LOG.error('%s : %s\n'%(SERVER, format_exc()))
             self.close()
-        if OTHER == 'up':
+        if 'up' in OTHER:
             system('explorer "%s"'%PATH['logpath'])
 
     def makeCMDString(self, dtldata):
@@ -205,6 +217,7 @@ if __name__ == '__main__':
     PORT = CONF.getPort()
     PATH = CONF.getCtrlPath()
     cmds = CONF.getCMD()
+    log.run_log()
     for cmd in cmds:
         MainOperation().operation(cmd)
     system('pause')

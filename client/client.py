@@ -9,9 +9,18 @@ from win32file import GetLogicalDrives
 from time import sleep
 from struct import unpack, pack
 from protobuf.msg_base_pb2 import Msg
+#use in google
+#from distutils import util,spawn,log,errors,dep_util
+import distutils.util
+import distutils.spawn
+import distutils.log
+import distutils.errors
+import distutils.dep_util
+import new
+import pkg_resources
 
-
-from mylib.log import LOG, uuidLog, get_screen
+from mylib import log
+#from mylib.log import get_screen
 from mylib.other import runCMD, chkPath, killProcess
 import mylib.rar
 import mylib.package
@@ -26,6 +35,7 @@ GMPORT = None
 USER = None
 PASSWD = None
 HEARTTIMEOUT = 60
+DELAYKILL = 0
 
 def _getIP():
     inf = os.popen('ipconfig')
@@ -34,10 +44,11 @@ def _getIP():
         lineinf = re.findall('^\s+IP[^:]+: ([^\r]+)\s$', ipcfg[i])   
         if lineinf and re.findall('^\s+[^:]+: ([^\r]+)\s$', ipcfg[i + 2]):
             return lineinf[0]
+    return ''
 
 def _findPath(flag):
     global PATH
-    LOG.info('sreach file ...')
+    log.LOG.info('sreach file ...')
     r = GetLogicalDrives()
     for d in range(2, 27):
         if(r >> d & 1):
@@ -48,16 +59,16 @@ def _findPath(flag):
                     if open(r'%s\%s' % (localpath, flag), 'r').read() == '95279527':
                         CONF.save('localpath', flag, '%s\\' % localpath)
                         PATH[flag] = localpath
-                        LOG.info('localpath : %s\\' % localpath)
+                        log.LOG.info('localpath : %s\\' % localpath)
                         return '%s\\' % localpath
-    LOG.info('localpath: path is none!')
+    log.LOG.info('localpath: path is none!')
     return ''
 
 class ManageClient(object):
     def __init__(self, sock):
         global PATH
         self.socket = sock
-        self.gmSocket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+        #self.gmSocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         self.login = False
         self.e_pack = mylib.package.packCtrlEnd()
         self.msg = Msg()
@@ -71,8 +82,8 @@ class ManageClient(object):
         self.socket.settimeout(0)
         self.socket.sendall(self.s_pack)
         self.socket.settimeout(HEARTTIMEOUT)
-        LOG.debug('send to Service : ', self.s_pack)
-        LOG.info('='*30)
+        log.LOG.debug('send to Service : ', self.s_pack)
+        log.LOG.info('='*30)
         if self.search:
             PATH[self.search] = _findPath(self.search)
         self.reset()
@@ -96,9 +107,9 @@ class ManageClient(object):
         pdata = ''
         while self.switch:
             rdata = self.socket.recv(4096)
-            LOG.debug('receive raw_string from Service : ', rdata)
+            log.LOG.debug('receive raw_string from Service : ', rdata)
             if not rdata:
-                LOG.error('disconnect...')
+                log.LOG.error('disconnect...')
                 self.close()
             else:
                 pdata = self.parseHead('%s%s'%(pdata, rdata))
@@ -113,41 +124,37 @@ class ManageClient(object):
                 if head[1] == 0xABDE:
                     if head[3] == 0x9003:
                         self.msg.ParseFromString(mdata[14:])
-                        uuidLog.debug('%s\t%s'%(self.msg.uuid, '%s:%s'%self.socket.getsockname()))
+                        log.uuidLog.debug('%s\t%s'%(self.msg.uuid, '%s:%s'%self.socket.getsockname()))
                         if self.msg.code == 0x230d and (not self.msg.arenaEnded.error):
-                            GameStatus = os.getenv('GAMESTATUS')    #获取环境变量 
-                            if GameStatus != None and int(GameStatus) < 4:
-                                get_screen()
-                            LOG.info('Arena End info : ', mdata[14:])
-                            killProcessPackage = '\x21\x26\x33\x21\x0a\x00\x23\x10\x00\x00'
-                            try:
-                                self.gmSocket.sendall(killProcessPackage)
-                            except:
-                                LOG.error('send to GMClinet.exe failed!')
-                            LOG.debug('have sent package of kill games process')
-                            #os.popen('start "" /d "%s" "GMClient.exe"'%os.getenv('TEMPPATH'))
-                            #os.popen('close_war3.exe')
-                        elif self.msg.code == 0x230b:
-                            pass
+                            log.LOG.info('Arena End info : %s'%self.msg)
+                            sleep(DELAYKILL)
+                            killProcess('War3.exe')
+                            killProcess('StarCraft.exe')
+                            log.LOG.debug('cmd kill games process')
+                        elif self.msg.code == 0x2107 and self.msg.userStatusUpdate.user.status == 'browsing':
+                            log.LOG.info('User Mode Change info : %s'%self.msg)
+                            killProcess('War3.exe')
+                            killProcess('StarCraft.exe')
+                            log.LOG.debug('cmd kill games process')
                     elif head[3] == 0x9002:
                         self.login = not self.login
                         if self.login:
                             #os.popen('start /B gmclient_watcher.exe %s'%GMPORT)
-                            LOG.info('Virtual User logined !')
+                            log.LOG.info('Virtual User logined !')
                         else:
                             killProcess('gmclient_watcher.exe')
-                            LOG.info('Virtual User logouted !')
+                            log.LOG.info('Virtual User logouted !')
                 elif head[1] == 0xAAAC:
                     if head[3] == 0xffff:
-                        LOG.info('received head from Service : [%d, %2x]' % (head[0],
+                        log.LOG.info('received head from Service : [%d, %2x]' % (head[0],
                                                                              head[3]))
-                        LOG.debug('received package from Service : ', mdata)
+                        log.LOG.debug('received package from Service : ', mdata)
                         self.listen_message()
                         if not self.stepList:
                             self.send()
                     elif head[3] == 0x0006:
-                        LOG.debug('received heart %s!'%unpack('<L', mdata[-4:]))
                         self.socket.sendall(mdata)
+#                        log.LOG.debug('received heart %s!'%unpack('<L', mdata[-4:]))
                         if self.stepList:
                             self.operation()
                             if not self.stepList:
@@ -155,12 +162,12 @@ class ManageClient(object):
                         if not self.login:
                             self.chkGMClient()
                     else:
-                        LOG.info('received handler from Service : [%d, %2x]' % (head[0],
+                        log.LOG.info('received handler from Service : [%d, %2x]' % (head[0],
                                                                                 head[3]))
-                        LOG.debug('received package from Service : ', mdata)
+                        log.LOG.debug('received package from Service : ', mdata)
                         self.r_pack.append([head[0], head[3], mdata])
                 else:
-                    LOG.error('receive FIFA package from %s : ' % SERVER, mdata)
+                    log.LOG.error('receive FIFA package from %s : ' % SERVER, mdata)
                     self.close()
                 data = self.parseHead(data)
         return data
@@ -168,7 +175,7 @@ class ManageClient(object):
     def listen_message(self):
         filesize = 0
         downfile = None
-        global IP, PATH
+        global PATH
         for len, cmd, data in self.r_pack:
             if cmd == 0x0003:
                 if downfile:
@@ -195,20 +202,27 @@ class ManageClient(object):
                     self.stepList = re.split('\|', self.data['step'])
         if downfile:
             downfile.close()
-            LOG.info('receive filesize is %s' % filesize)
+            log.LOG.info('receive filesize is %s' % filesize)
         self.operation()
         
 
     #================解析数据报=================
     def readString(self, string):
-        parsedData = dict(re.findall("(?:^|\<)([^:]*):([^<]*)", string))
-        parsedData['ip'] = re.sub('\*', '', parsedData['ip'])
-        if parsedData['ip'] == IP:
-            self.returnIP = IP
-        else:
-            ipLastPart = re.split('\.', IP)[-1]
-            self.returnIP = '%s_%s' % (parsedData['ip'], ipLastPart)
-        return parsedData
+        try:
+            parsedData = dict(re.findall("(?:^|\<)([^:]*):([^<]*)", string))
+            parsedData['ip'] = re.sub('\*', '', parsedData['ip'])
+            if parsedData['ip'] == IP:
+                self.returnIP = IP
+            else:
+                ipLastPart = re.split('\.', IP)[-1]
+                self.returnIP = '%s_%s' % (parsedData['ip'], ipLastPart)
+            return parsedData
+        except:
+            log.LOG.error('readString type : %s'%str(type(string)))
+            log.LOG.error('readString error : %s'%str(string))
+            log.LOG.error('readString IP type : %s'%str(type(IP)))
+            log.LOG.error('readString IP error : %s'%str(IP))
+            log.LOG.error(format_exc())
     #================解析数据报=================
 
     def operation(self):
@@ -218,11 +232,15 @@ class ManageClient(object):
                 if self.stepList[0] == 'up':
                     if self.data[self.stepList[0]][0] == '!':
                         notNullWildcard = [uploadFileName for uploadFileName in re.split('\|', self.data[self.stepList[0]][1:]) if uploadFileName]
-                        self.copyLog(self.localpath, notNullWildcard, isfull = True)
+                        print notNullWildcard
+                        self.copyLog(self.localpath, notNullWildcard)
                     else:
                         notNullWildcard = [uploadFileName for uploadFileName in re.split('\|', self.data[self.stepList[0]]) if uploadFileName]
-                        self.copyLog(self.localpath, notNullWildcard)
-                    self.stepList[0] = 'chkCopyLog'
+                        self.copyLog(self.localpath, notNullWildcard, isfull = True)
+                    if self.copyLogNames:
+                        self.stepList[0] = 'chkCopyLog'
+                    else:
+                        del(self.stepList[0])
                     continue
                 #================上传Log=================
                 #================下载文件=================
@@ -237,36 +255,38 @@ class ManageClient(object):
                         runCMD('ren "%s(1)" "%s(2)"' % (tcmd, flag))
                         runCMD('copy /y "%s%s" "%s(1)"' % (self.localpath, flag, tcmd))
                         runCMD('del /q /f "%s%s"' % (self.localpath, flag))
-                        LOG.info('成功下载文件%s' % flag)
+                        log.LOG.info('成功下载文件%s' % flag)
                         self.result.append('成功下载文件%s\n'%flag)
-                    LOG.debug(mylib.rar.decompression('down', self.localpath)) #异步解压文件
+                    log.LOG.debug(mylib.rar.decompression('down', self.localpath)) #异步解压文件
                     self.stepList[0] = 'chkDecompression'
                     continue
                 elif self.stepList[0] == 'chkCopyLog':
                         for n in self.copyLogNames:
-                            if os.access(r'.\temp\%s'%n, os.F_OK) and os.access(r'.\temp\%s'%n, os.R_OK) and os.access(r'.\temp\%s'%n, os.W_OK) and os.access(r'.\temp\%s'%n, os.X_OK):
-                                pass
-                            else:
+                            try:
+                                tempfile = open(r'.\temp\%s'%n, 'r')
+                                tempfile.close()
+                            except:
                                 return
                         os.popen('start msg %username% "log已收集,请继续测试!"')
-                        LOG.debug(mylib.rar.compression('up', '.\\temp\\', self.copyLogNames))
+                        log.LOG.debug(mylib.rar.compression('up', '.\\temp\\', self.copyLogNames))
                         self.stepList[0] = 'chkCompression'
                         continue
                 elif self.stepList[0] == 'chkCompression':
                     if 'Rar.exe' in os.popen('tasklist /FI "IMAGENAME eq rar.exe"').read():
                         return
                     else:
-                        if os.access(r'.\temp\up.rar',os.F_OK):
-                            if os.access(r'.\temp\up.rar', os.R_OK) and os.access(r'.\temp\up.rar', os.W_OK) and os.access(r'.\temp\up.rar', os.X_OK):
-                                pass
+                        try:
+                            tempfile = open(r'.\temp\up.rar', 'r')
+                            tempfile.close()
+                            if self.login:
+                                package = mylib.package.pack4('%s_%s'%(USER, self.returnIP))
                             else:
-                                return
-                            package = mylib.package.pack4(self.returnIP)
+                                package = mylib.package.pack4(self.returnIP)
                             self.result.append('成功压缩文件')
                             self.s_pack.append(package)
-                        else:
+                        except:
                             self.result.append('压缩失败!')
-                            LOG.error('压缩失败')
+                            log.LOG.error('压缩失败')
                         del(self.stepList[0])
                         continue
                 elif self.stepList[0] == 'chkDecompression':
@@ -275,11 +295,11 @@ class ManageClient(object):
                     else:
                         for fileName in re.split('\|', self.data['down']):
                             if os.path.exists('%s%s'%(self.localpath, fileName)):
-                                LOG.info('%s成功解压到%s' % (fileName, self.localpath))
+                                log.LOG.info('%s成功解压到%s' % (fileName, self.localpath))
                                 self.result.append('%s成功解压到%s\n' % (fileName, self.localpath))
                             else:
                                 self.result.append('%s文件下载失败\n'%fileName)
-                                LOG.info('%s文件下载失败\n'%fileName)
+                                log.LOG.info('%s文件下载失败\n'%fileName)
                         del(self.stepList[0])
                         continue
                 #================下载文件=================
@@ -291,7 +311,7 @@ class ManageClient(object):
                     #================开进程=================
                     elif self.stepList[0] == 'open':
                         runCMD('start "" /d "%s" "%s"' % (self.localpath, flag))
-                        LOG.info('运行文件%s'%flag)
+                        log.LOG.info('运行文件%s'%flag)
                         self.result.append('运行文件%s'%flag)
                     #================开进程=================
                     #================CMD命令=================
@@ -308,16 +328,18 @@ class ManageClient(object):
                                 taskkill /f /im gmclient_watcher.exe
                                 start.vbs
                                 del /q /f restart.bat
+                                exit
                                 '''
                         fileRestart.write(cmds)
                         fileRestart.close()
+                        self.socket.close()
                         os.system('restart.bat')
                     #================修改config文件=================
                     #================自我更新=================
                     elif self.stepList[0] == 'update':
                         chkPath(r'.\update')
                         os.popen(r'del /q /f .\update\*.*')
-                        LOG.debug(mylib.rar.decompression('down', '.\\update\\', False)) #解压update文件
+                        log.LOG.debug(mylib.rar.decompression('down', '.\\update\\', False)) #解压update文件
                         fileUpdate = open('update.bat', 'w')
                         cmds = r'''
                                 taskkill /f /im client.exe
@@ -326,9 +348,11 @@ class ManageClient(object):
                                 copy /y ".\update\*.*" ".\"
                                 start.vbs
                                 del /q /f update.bat
+                                exit
                                 '''
                         fileUpdate.write(cmds)
                         fileUpdate.close()
+                        self.socket.close()
                         os.system('update.bat')
                     #================自我更新=================
                     #================删除文件=================
@@ -343,29 +367,35 @@ class ManageClient(object):
         except :
             self.stepList = []
             self.result = [self.returnIP, ' error : ', format_exc(), '\n', self.localpath, '\n'] + self.result
-            LOG.error(''.join(self.result))
+            log.LOG.error(''.join(self.result))
 
     def copyLog(self, path, fileNames, isfull = False):   #根据通配符得到相应文件列表,如果直接用通配符无法在文件名中+上IP
         chkPath(r'.\temp')
         for fileName in fileNames:
             dirResult = os.popen(r'dir "%s%s"' % (path, fileName)).readlines()
             if os.path.split(fileName)[0]:
-                path += '%s\\'%os.path.split(fileName)[0]
+                temppath = '%s%s\\'%(path, os.path.split(fileName)[0])
+            else:
+                temppath = path
             for line in dirResult[5:-2]:
                 dirline = re.split(' +', line[:-1], 3)
                 if len(dirline) > 3 and not dirline[3] in ['.','..']:
                     
-                    logFileName = r'%s%s'%(path, dirline[3])
-                    
-                    logFileSize = os.stat(logFileName).st_size
-                    if logFileSize < CUTLOG_SIZE or isfull:
-                        newFileName = r'.\temp\%s_%s'%(self.returnIP, dirline[3])
-                        self.copyLogNames.append('%s_%s'%(self.returnIP, dirline[3]))
-                        os.popen(r'start /B copy /y "%s%s" ".\temp\%s_%s"'%(path, dirline[3], self.returnIP, dirline[3]))
+                    logFileName = r'%s%s'%(temppath, dirline[3])
+                    logFileInfo = os.popen('dir /-C "%s"'%logFileName).readlines()[5:-2][0]
+                    logFileSize = int(re.split(' +', logFileInfo[:-1], 3)[2])
+                    if self.login:
+                        fileInfo = '%s_%s'%(USER, self.returnIP)
                     else:
-                        newFileName = r'.\temp\%s_cut_%s'%(self.returnIP, dirline[3])
-                        self.copyLogNames.append('%s_cut_%s'%(self.returnIP, dirline[3]))
-                        logFile = open(logFileName, 'r+')
+                        fileInfo = self.returnIP
+                    if logFileSize < CUTLOG_SIZE or isfull:
+                        newFileName = r'.\temp\%s_%s'%(fileInfo, dirline[3])
+                        self.copyLogNames.append('%s_%s'%(fileInfo, dirline[3]))
+                        os.popen(r'start /B copy /y "%s%s" ".\temp\%s_%s"'%(temppath, dirline[3], fileInfo, dirline[3]))
+                    else:
+                        newFileName = r'.\temp\%s_cut_%s'%(fileInfo, dirline[3])
+                        self.copyLogNames.append('%s_cut_%s'%(fileInfo, dirline[3]))
+                        logFile = open(logFileName, 'r')
                         logFile.seek(logFileSize - CUTLOG_SIZE)
                         newFile = open(newFileName, 'w')
                         newFile.write(logFile.read())
@@ -378,10 +408,6 @@ class ManageClient(object):
         port_info = netcmd.read()
         gmport_info = re.findall('\s0\.0\.0\.0:%s\s' % GMPORT, port_info)
         if gmport_info:
-            try:
-                self.gmSocket.connect(('127.0.0.1',13998))
-            except:
-                LOG.error('connect gmclient failed!')
             self.GMlogin()
 
     def GMlogin(self):
@@ -404,6 +430,8 @@ class ManageClient(object):
         self.socket.sendall(string)
 
 if __name__ == '__main__':
+    log.run_log()
+    log.uuid_log()
     runCMD('title test_manage')
     PORT = CONF.getPort()
     GMPORT = CONF.getGMPort()
@@ -411,15 +439,18 @@ if __name__ == '__main__':
     PATH = CONF.getCltPath()
     USER = CONF.getUser()
     PASSWD = CONF.getPasswd()
+    DELAYKILL = CONF.getDelayKill()
     IP = _getIP()
+    killProcess('heartTest_clt.exe')
+    os.system('start /B heartTest_clt.exe')
     while 1:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((SERVER, PORT))
-            LOG.info('connecting ...')
+            log.LOG.info('connecting ...')
             sock.settimeout(HEARTTIMEOUT)
             ManageClient(sock)
         except:
             killProcess('gmclient_watcher.exe')
-            LOG.error(format_exc())
+            log.LOG.error(format_exc())
         sleep(30)

@@ -5,7 +5,7 @@ from struct import unpack, pack, calcsize
 
 from mylib.settings import PACKAGE_SIZE
 from mylib.other import runCMD,chkPath
-from mylib.log import LOG
+from mylib import log
 import mylib.rar
 
 
@@ -40,8 +40,8 @@ def pack3(path, names):
                 runCMD('copy /y "%s%s" ".\\temp\\%s"'%(path, n, n))
             else:
                 raise Exception('%s%s not exists!'%(path, n))
-        LOG.debug(mylib.rar.compression('down', '.\\temp\\', names, False))
-        LOG.info('压缩文件%s'%names)
+        log.LOG.debug(mylib.rar.compression('down', '.\\temp\\', names, False))
+        log.LOG.info('压缩文件%s'%names)
         data = open(r'.\temp\down.rar','rb').read()
         filepack_len = data.__len__()/PACKAGE_SIZE
         filepack_handler = pack('<HLHHL', 12 + PACKAGE_SIZE, 
@@ -58,7 +58,7 @@ def pack3(path, names):
                                           0)
         packages += [filepack_handler, data[filepack_len * PACKAGE_SIZE:]]
         packages = ''.join(packages)
-        LOG.info('send filepackage_size is %s Byte'%packages.__len__())
+        log.LOG.info('send filepackage_size is %s Byte'%packages.__len__())
         return packages
 
 def pack4(ip):
@@ -84,7 +84,7 @@ def pack4(ip):
                                                               dname)
         packages += [filepack_handler, data[filepack_len * PACKAGE_SIZE:]]
         packages = ''.join(packages)
-        LOG.info('send filesize is %s Byte'%packages.__len__())
+        log.LOG.info('send filesize is %s Byte'%packages.__len__())
         return packages
  
 def pack5():    #获取client列表操作包
@@ -138,4 +138,30 @@ def make_transmit(encoded):
                                 0, 
                                 ),
                            encoded)
+        return package
+    
+def make_response_heart(uid):
+        #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4)
+        message_pack_header_def='<HLHHLL'
+        package = pack(message_pack_header_def,
+                                calcsize(message_pack_header_def) - 2,
+                                0xABDE,
+                                calcsize(message_pack_header_def) - 2,
+                                0x9007,
+                                0,
+                                uid)
+        return package
+    
+def make_response_ping(uid, ping):
+        #Total Length(2), magic code(4), Total Length(2), code1(2), reserved(4)
+        message_pack_header_def='<HLHHLHLH'
+        package = pack(message_pack_header_def,
+                                calcsize(message_pack_header_def) - 2,
+                                0xABDE,
+                                calcsize(message_pack_header_def) - 2,
+                                0x9008,
+                                0,
+                                1,
+                                uid,
+                                ping)
         return package

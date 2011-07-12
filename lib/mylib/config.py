@@ -63,4 +63,7 @@ class myConfig(object):
     def getGMPort(self):
         return int(self.conf.get('Script', 'gmport'))
     
+    def getDelayKill(self):
+        return int(self.conf.get('Script', 'delaykill'))
+    
 CONF = myConfig()

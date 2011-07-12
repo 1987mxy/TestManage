@@ -95,3 +95,14 @@ testmachine5-30
 可以设定up列表第一个字符为"!"使client上传完整log,否则将截取至小于等于25MB的最新log
 修复了当接收到arena_end消息后，游戏进程无法关闭的问题
 可以用ctrl+C终止server.py
+===================================
+testmachine6-10
+Script-delaykill用来获得DOTA的REP而延迟强杀war3.exe
+===================================
+testmachine6-13
+使用外部程序killprocess.exe方法强杀进程
+===================================
+testmachine7-5
+改变up列表首字符为"!"含义，如有则为cut的日志反之亦然
+up列表如不为cut的日志，则日志文件在上传后不解压
+上传的日志文件名增加账号信息（client必须是登陆状态）

@@ -14,13 +14,13 @@ TestManage = ServiceParameter()
 TestManage.port = 8782
 TestManage.magicCode = 0xAAAC
 TestManage.heartCode = 0x0006
-TestManage.responseCode = 0x9ff3
+#TestManage.responseCode = 0x9ff3
 
 VirtualMessagetoClient = ServiceParameter()
 VirtualMessagetoClient.port = 16667
 VirtualMessagetoClient.magicCode = 0xABDE
 VirtualMessagetoClient.heartCode = 0x9006
-VirtualMessagetoClient.responseCode = 0x9ff3
+#VirtualMessagetoClient.responseCode = 0x9ff3
     
 VirtualMessagetoService = ServiceParameter()
 VirtualMessagetoService.port = 13340
@@ -42,9 +42,9 @@ PRINT_PERFORMANCELOG = True
 
 Status = 'debug'
 
-VirtualMessage = False
+VirtualMessage = True
 
-APPSERVER = r'http://172.16.4.2:8083/campus/api'
+APPSERVER = r'http://172.16.4.2:8084/campus/api'
 
 #===============================================================================
 # PACKAGE

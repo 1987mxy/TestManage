@@ -2,15 +2,19 @@
 
 import logging
 from sys import stdout
-from os import path,mkdir,popen
-from win32gui import GetWindowDC
-from win32ui import CreateDCFromHandle, CreateBitmap
-from win32api import EnumDisplayMonitors
-from win32con import SRCCOPY
+from os import path,mkdir
+#from os import popen
+#from win32gui import GetWindowDC
+#from win32ui import CreateDCFromHandle, CreateBitmap
+#from win32api import EnumDisplayMonitors
+#from win32con import SRCCOPY
 from mylib.config import CONF
 
 import mylib.settings
+
 LOG = None
+uuidLog = None
+heartLog = None
 
 class mylog(object):
     def __init__(self, logger):
@@ -91,23 +95,24 @@ def _pathrule(logtype, filetype = 'log'):
         mkdir("log")
     return r'./log/%s_%s.%s'%(time, logtype, filetype)
     
-def get_screen():
-    hwnd = 0
-    hwndDC = GetWindowDC(hwnd)
-    mfcDC = CreateDCFromHandle(hwndDC)
-    saveDC = mfcDC.CreateCompatibleDC()
-    saveBitMap = CreateBitmap()
-    MoniterDev = EnumDisplayMonitors(None,None)
-    w = MoniterDev[0][2][2]
-    h = MoniterDev[0][2][3]
-    saveBitMap.CreateCompatibleBitmap(mfcDC, w, h)
-    saveDC.SelectObject(saveBitMap)
-    saveDC.BitBlt((0,0),(w, h) , mfcDC, (0,0), SRCCOPY)  
-    bmpname = _pathrule('error', 'bmp')
-    saveBitMap.SaveBitmapFile(saveDC, bmpname)
+#def get_screen():
+#    hwnd = 0
+#    hwndDC = GetWindowDC(hwnd)
+#    mfcDC = CreateDCFromHandle(hwndDC)
+#    saveDC = mfcDC.CreateCompatibleDC()
+#    saveBitMap = CreateBitmap()
+#    MoniterDev = EnumDisplayMonitors(None,None)
+#    w = MoniterDev[0][2][2]
+#    h = MoniterDev[0][2][3]
+#    saveBitMap.CreateCompatibleBitmap(mfcDC, w, h)
+#    saveDC.SelectObject(saveBitMap)
+#    saveDC.BitBlt((0,0),(w, h) , mfcDC, (0,0), SRCCOPY)  
+#    bmpname = _pathrule('error', 'bmp')
+#    saveBitMap.SaveBitmapFile(saveDC, bmpname)
     
 def run_log():
 #    runlog
+    global LOG
     rlog = logging.getLogger('runlog')
     rlog.setLevel(logging.DEBUG)
     lpath = _pathrule('run')
@@ -126,8 +131,8 @@ def run_log():
     logfile.setLevel(logging.ERROR)
     logfile.setFormatter(fmt)
     rlog.addHandler(logfile)
-    myrlog = mylog(rlog)
-    return myrlog
+    LOG = mylog(rlog)
+    #print LOG
 
 #===============================================================================暂不统计性能指数
 # def performance_log():
@@ -148,7 +153,8 @@ def run_log():
 #===============================================================================
 
 def uuid_log():
-#    runlog
+#    uuidlog
+    global uuidLog
     uuidlog = logging.getLogger('uuidlog')
     uuidlog.setLevel(logging.DEBUG)
     lpath = _pathrule('uuidlog')
@@ -157,9 +163,24 @@ def uuid_log():
     fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     logfile.setFormatter(fmt)
     uuidlog.addHandler(logfile)
-    myUuidlog = mylog(uuidlog)
-    return myUuidlog
+    uuidLog = mylog(uuidlog)
 
-LOG = run_log()
-uuidLog = uuid_log()
-
+def heart_log():
+    global heartLog
+    heartlog = logging.getLogger('heartLog')
+    heartlog.setLevel(logging.DEBUG)
+    lpath = _pathrule('heartLog')
+    logfile = logging.FileHandler(lpath, "w")
+    logfile.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    logfile.setFormatter(fmt)
+    heartlog.addHandler(logfile)
+    display = logging.StreamHandler(stdout)
+    display.setLevel(logging.INFO)
+    heartlog.addHandler(display)  #print to screen
+    lpath = _pathrule('heartlog_error')
+    logfile = logging.FileHandler(lpath, "w")
+    logfile.setLevel(logging.ERROR)
+    logfile.setFormatter(fmt)
+    heartlog.addHandler(logfile)
+    heartLog = mylog(heartlog)

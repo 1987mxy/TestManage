@@ -129,7 +129,7 @@ fix bug : log print "Process %s do not death!"
 fix bug :  File "client.py", line 156, in parseHead, AttributeError: 'ManageClient' object has no attribute 'address'
 =========================================
 5-27
-use os.access() get file open popedom
+use os.access() get file open authority
 copy full log file send to control if upload file list first word is "!", otherwise copy log file 25MB of last
 =========================================
 5-30
@@ -138,3 +138,72 @@ add uuid log recording uuid of full 0x9003 packages
 Ctrl+C terminated server.py
 fixed protocol can not parser uuid
 fixed testmanage disconnect to server and do not remove self in connectClient[uid]
+=========================================
+6-1
+double connect to gmclient.exe close send 0x1023 package to gmclient
+add listen list size to 100 in server.py
+=========================================
+6-2
+add exception check and error log in readString function of client.py
+fixed self.user in loginInfo and self.uid not in connectClient arouse "connectClient[self.uid].append(self)" bug in TestManage double login
+fixed beControlClient full not in connectClient arouse can not return control a 0xff00 package
+=========================================
+6-3
+client close socket when client execute 'update' and 'conf' command
+the uid logout when the uid have not connect about 13340 port
+cancel quit method which broadcast 'exit' string 
+=========================================
+6-9
+fixed have exception permission denied when using os.stat()
+delay 5 sec killed game process when receive arenaEnded message
+note getScreen function
+=========================================
+6-10
+cancel use os.access function get file access authority because often permission denied in sometime
+cancel use os.stat function get file size because often permission denied in sometime
+user python2.5 compile for compatible windows vista
+fixed service user ID record can not clear when force killed GMClient.exe process
+fixed logined client count mistake when check client connect information
+=========================================
+6-13
+use killprocess.exe program force kill process
+=========================================
+6-14
+fixed bug about killprocess.exe infinite loop
+runCMD function is used to execute killprocess.exe
+=========================================
+6-17
+fixed bug in server.py is 
+	File "server.py", line 567, in do_logout
+    	del(connectClient[self.uid])
+	KeyError: ''
+=========================================
+6-20
+add heart is 0x9007 response to flash
+add return ping value function, and the package is 0x9008
+change class VirtualMessage_to_Client to VirtualMessage_to_Flash
+change CMClient to Flash about VirtualMessage_to_Flash class log
+=========================================
+6-22
+cancel package 0x9007 output to log
+=========================================
+6-28
+add heartTest.py is check out network status
+=========================================
+6-29
+fixed heartlog bug about invalid argument
+=========================================
+6-30
+fixed bug about VirtualMessage send http request
+fixed bug about loss upload log
+change method of call log module
+=========================================
+7-1
+cancel that client log record heart beat and resolve client beat heart time out because disk IO busy
+fix bug about control timeout because network IO busy
+fix bug about local IP is none type
+=========================================
+7-5
+reverse means about first word is "!" in upload log list
+add client account information on upload log file name
+upload log will not be decompression if upload log doesn't be cut
